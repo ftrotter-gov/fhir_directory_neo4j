@@ -1,0 +1,240 @@
+"""
+OrganizationAffiliation resource importer.
+"""
+
+from typing import Dict, Any, List
+from neo4j import Session
+from .base import BaseImporter, _to_json_string
+
+
+class OrganizationAffiliationImporter(BaseImporter):
+    """Import OrganizationAffiliation resources into Neo4j."""
+    
+    RESOURCE_TYPE = "OrganizationAffiliation"
+    NODE_LABEL = "OrganizationAffiliation"
+    
+    def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
+        """
+        Import a batch of OrganizationAffiliation resources.
+        
+        Args:
+            session: Neo4j session
+            batch: List of OrganizationAffiliation FHIR resources
+        
+        Returns:
+            Number of nodes created/updated
+        """
+        # Prepare data for batch import
+        affiliation_data = []
+        
+        for resource in batch:
+            fhir_id = resource.get('id')
+            if not fhir_id:
+                self._log(message=f"Skipping OrganizationAffiliation without id: {resource}")
+                continue
+            
+            # Extract identifiers as objects
+            identifiers = self._extract_identifiers(resource=resource)
+            
+            # Extract active status
+            active = resource.get('active')
+            
+            # Extract organization reference (the primary organization)
+            org_ref = resource.get('organization', {})
+            org_reference = org_ref.get('reference') if isinstance(org_ref, dict) else None
+            org_id = self._parse_reference(reference=org_reference)
+            
+            # Extract participating organization reference
+            participating_org_ref = resource.get('participatingOrganization', {})
+            participating_org_reference = participating_org_ref.get('reference') if isinstance(participating_org_ref, dict) else None
+            participating_org_id = self._parse_reference(reference=participating_org_reference)
+            
+            # Extract code (type of affiliation)
+            codes = []
+            for code in resource.get('code', []):
+                if isinstance(code, dict):
+                    coding = code.get('coding', [])
+                    if coding and isinstance(coding, list):
+                        for c in coding:
+                            if isinstance(c, dict):
+                                codes.append(c.get('display', c.get('code', '')))
+            
+            # Extract specialty
+            specialties = []
+            for specialty in resource.get('specialty', []):
+                if isinstance(specialty, dict):
+                    coding = specialty.get('coding', [])
+                    if coding and isinstance(coding, list):
+                        for c in coding:
+                            if isinstance(c, dict):
+                                specialties.append(c.get('display', c.get('code', '')))
+            
+            # Extract location references
+            location_refs = resource.get('location', [])
+            location_ids = []
+            if isinstance(location_refs, list):
+                for loc_ref in location_refs:
+                    if isinstance(loc_ref, dict):
+                        ref = loc_ref.get('reference')
+                        loc_id = self._parse_reference(reference=ref)
+                        if loc_id:
+                            location_ids.append(loc_id)
+            
+            # Extract endpoint references
+            endpoint_refs = resource.get('endpoint', [])
+            endpoint_ids = []
+            if isinstance(endpoint_refs, list):
+                for ep_ref in endpoint_refs:
+                    if isinstance(ep_ref, dict):
+                        ref = ep_ref.get('reference')
+                        ep_id = self._parse_reference(reference=ref)
+                        if ep_id:
+                            endpoint_ids.append(ep_id)
+            
+            affiliation_data.append({
+                'fhir_id': fhir_id,
+                'resource_type': self.RESOURCE_TYPE,
+                'active': active,
+                'organization_id': org_id,
+                'participating_organization_id': participating_org_id,
+                'codes': codes,
+                'specialties': specialties,
+                'location_ids': location_ids,
+                'endpoint_ids': endpoint_ids,
+                'identifiers': _to_json_string(obj=identifiers),
+                'import_tag': self.import_tag,
+            })
+        
+        # Batch import nodes - use CREATE or MERGE based on mode
+        if self.use_create:
+            query = """
+            UNWIND $batch AS aff
+            CREATE (oa:OrganizationAffiliation {
+                fhir_id: aff.fhir_id,
+                import_tag: aff.import_tag,
+                resource_type: aff.resource_type,
+                active: aff.active,
+                organization_reference: aff.organization_id,
+                participating_organization_reference: aff.participating_organization_id,
+                codes: aff.codes,
+                specialties: aff.specialties,
+                location_references: aff.location_ids,
+                endpoint_references: aff.endpoint_ids,
+                identifiers: aff.identifiers
+            })
+            RETURN count(oa) AS count
+            """
+        else:
+            query = """
+            UNWIND $batch AS aff
+            MERGE (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            ON CREATE SET oa.import_tag = aff.import_tag
+            SET oa.resource_type = aff.resource_type,
+                oa.active = aff.active,
+                oa.organization_reference = aff.organization_id,
+                oa.participating_organization_reference = aff.participating_organization_id,
+                oa.codes = aff.codes,
+                oa.specialties = aff.specialties,
+                oa.location_references = aff.location_ids,
+                oa.endpoint_references = aff.endpoint_ids,
+                oa.identifiers = aff.identifiers
+            RETURN count(oa) AS count
+            """
+        
+        result = session.run(query, batch=affiliation_data)
+        record = result.single()
+        node_count = record['count'] if record else 0
+        
+        # Create relationships
+        self._create_relationships(session=session, affiliation_data=affiliation_data, use_create=self.use_create)
+        
+        return node_count
+    
+    @staticmethod
+    def _create_relationships(*, session: Session, affiliation_data: List[Dict[str, Any]], use_create: bool = False) -> None:
+        """
+        Create relationships between OrganizationAffiliation and other resources.
+        
+        Args:
+            session: Neo4j session
+            affiliation_data: List of processed affiliation data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
+        """
+        if use_create:
+            # FAST MODE: Single combined query to minimize round trips (4x faster!)
+            combined_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            
+            // Primary organization relationship
+            OPTIONAL MATCH (o:Organization {fhir_id: aff.organization_id})
+            WHERE aff.organization_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN o IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (o)-[:HAS_AFFILIATION]->(oa)
+            )
+            
+            // Participating organization relationship
+            WITH oa, aff
+            OPTIONAL MATCH (po:Organization {fhir_id: aff.participating_organization_id})
+            WHERE aff.participating_organization_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN po IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:AFFILIATED_WITH]->(po)
+            )
+            
+            // Location relationships (multiple)
+            WITH oa, aff
+            UNWIND COALESCE(aff.location_ids, []) AS loc_id
+            OPTIONAL MATCH (l:Location {fhir_id: loc_id})
+            FOREACH (_ IN CASE WHEN l IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:AT_LOCATION]->(l)
+            )
+            
+            // Endpoint relationships (multiple)
+            WITH DISTINCT oa, aff
+            UNWIND COALESCE(aff.endpoint_ids, []) AS ep_id
+            OPTIONAL MATCH (e:Endpoint {fhir_id: ep_id})
+            FOREACH (_ IN CASE WHEN e IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:HAS_ENDPOINT]->(e)
+            )
+            """
+            session.run(combined_query, batch=affiliation_data)
+            
+        else:
+            # SAFE MODE: Separate queries using MERGE (slower but clearer)
+            # Create primary organization relationships
+            org_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (o:Organization {fhir_id: aff.organization_id})
+            MERGE (o)-[:HAS_AFFILIATION]->(oa)
+            """
+            session.run(org_query, batch=[a for a in affiliation_data if a.get('organization_id')])
+            
+            # Create participating organization relationships
+            part_org_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (o:Organization {fhir_id: aff.participating_organization_id})
+            MERGE (oa)-[:AFFILIATED_WITH]->(o)
+            """
+            session.run(part_org_query, batch=[a for a in affiliation_data if a.get('participating_organization_id')])
+            
+            # Create Location relationships
+            loc_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            UNWIND aff.location_ids AS loc_id
+            MATCH (l:Location {fhir_id: loc_id})
+            MERGE (oa)-[:AT_LOCATION]->(l)
+            """
+            session.run(loc_query, batch=[a for a in affiliation_data if a.get('location_ids')])
+            
+            # Create Endpoint relationships
+            ep_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            UNWIND aff.endpoint_ids AS ep_id
+            MATCH (e:Endpoint {fhir_id: ep_id})
+            MERGE (oa)-[:HAS_ENDPOINT]->(e)
+            """
+            session.run(ep_query, batch=[a for a in affiliation_data if a.get('endpoint_ids')])
