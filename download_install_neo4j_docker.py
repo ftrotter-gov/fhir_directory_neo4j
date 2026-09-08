@@ -302,7 +302,11 @@ class Neo4jDockerInstaller:
                 print("Neo4j is healthy.")
                 return
             if last_health in {"exited", "dead", "unhealthy"}:
-                break
+                raise RuntimeError(
+                    "download_install_neo4j_docker.py Error: Neo4j entered "
+                    f"container state '{last_health}'. "
+                    "Run 'docker compose logs neo4j' for details."
+                )
             time.sleep(2)
         raise RuntimeError(
             "download_install_neo4j_docker.py Error: Neo4j did not become healthy "

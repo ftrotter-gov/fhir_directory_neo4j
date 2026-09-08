@@ -105,7 +105,7 @@ class Neo4jDockerInstallerTest(unittest.TestCase):
     def test_wait_for_neo4j_reports_unhealthy_container(
         self, mocked_get_container_health
     ) -> None:
-        with self.assertRaisesRegex(RuntimeError, "last status: unhealthy"):
+        with self.assertRaisesRegex(RuntimeError, "container state 'unhealthy'"):
             Neo4jDockerInstaller.wait_for_neo4j(
                 repository_root=Path("/project"), timeout_seconds=30
             )
