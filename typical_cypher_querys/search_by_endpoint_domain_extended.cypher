@@ -10,7 +10,8 @@
 // the visualization.
 
 MATCH (e:Endpoint)
-WHERE e.address CONTAINS 'example.com'
+WHERE e.FHIR_address CONTAINS 'example.com'
+   OR e.Direct_address CONTAINS 'example.com'
 MATCH path = (e)-[*1..2]-(connected)
 RETURN path
 LIMIT 100;

@@ -21,6 +21,7 @@
 
 MATCH (n)
 WHERE n.npi = '1234567890'
+   OR '1234567890' IN n.npis
 
 // Get direct connections (one hop to anything)
 OPTIONAL MATCH path1 = (n)--(connected1)

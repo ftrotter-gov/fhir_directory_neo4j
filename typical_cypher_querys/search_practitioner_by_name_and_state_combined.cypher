@@ -1,7 +1,7 @@
 // Search by Practitioner Last Name and State - Combined
 // 
 // Purpose: Find practitioners by last name who have the state either in:
-//   1. Their own address (stored in states array), OR
+//   1. Their own address (stored as serialized JSON), OR
 //   2. Work at a location in that state (via PractitionerRole → Location)
 //
 // This is the most comprehensive state-based search for practitioners.
@@ -17,10 +17,10 @@
 MATCH (p:Practitioner)
 WHERE p.name CONTAINS 'Smith'
   AND (
-    ANY(state IN p.states WHERE state = 'CA')
+    p.addresses CONTAINS '"state": "CA"'
     OR EXISTS {
       MATCH (p)-[:HAS_ROLE]->(:PractitionerRole)-[:AT_LOCATION]->(l:Location)
-      WHERE l.state = 'CA'
+      WHERE l.address CONTAINS '"state": "CA"'
     }
   )
 MATCH path = (p)-[*1..2]-(connected)

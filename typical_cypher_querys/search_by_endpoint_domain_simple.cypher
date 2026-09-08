@@ -8,6 +8,7 @@
 // everything directly connected to them.
 
 MATCH (e:Endpoint)
-WHERE e.address CONTAINS 'example.com'
+WHERE e.FHIR_address CONTAINS 'example.com'
+   OR e.Direct_address CONTAINS 'example.com'
 MATCH path = (e)--(connected)
 RETURN path;

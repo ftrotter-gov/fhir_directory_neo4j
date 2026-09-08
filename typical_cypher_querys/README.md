@@ -2,6 +2,11 @@
 
 This directory contains individual Cypher query files extracted from the main TypicalQuery.md documentation. Each file focuses on a specific type of search query with detailed comments.
 
+Practitioner `addresses`, Organization `addresses`, and Location `address` are
+stored as JSON strings. The state examples use `CONTAINS` for convenient graph
+exploration; applications should parse these values for robust field-level
+filtering.
+
 ## Query Files
 
 ### Search by NPI

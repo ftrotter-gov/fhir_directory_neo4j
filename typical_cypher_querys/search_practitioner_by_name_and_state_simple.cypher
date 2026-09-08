@@ -1,7 +1,7 @@
 // Search by Practitioner Last Name and State - Simple
 // 
 // Purpose: Find practitioners by last name who have a specific state in their own 
-// address (stored in the states array property).
+// address (stored in the serialized addresses JSON property).
 //
 // Usage: 
 //   - Replace 'Smith' with the last name you're searching for
@@ -12,6 +12,6 @@
 
 MATCH (p:Practitioner)
 WHERE p.name CONTAINS 'Smith'
-  AND ANY(state IN p.states WHERE state = 'CA')
+  AND p.addresses CONTAINS '"state": "CA"'
 MATCH path = (p)--(connected)
 RETURN path;

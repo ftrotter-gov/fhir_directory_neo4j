@@ -160,7 +160,7 @@ def load_neo4j_config() -> Dict[str, str]:
     if not config['password']:
         print("Warning: NEO4J_PASSWORD environment variable not set!")
         print("Set it using: export NEO4J_PASSWORD=your_password")
-        print("Or create a .env file in the analysis_neo4j directory")
+        print("Or copy example.env to .env in the repository root")
         sys.exit(1)
     
     return config
@@ -196,9 +196,9 @@ def check_neo4j_connection(*, config: Dict[str, str]) -> bool:
         print(f"{'='*60}")
         print(f"\nNeo4j server at {config['uri']} is not available.")
         print("\nPossible solutions:")
-        print("  1. Start Neo4j: cd analysis_neo4j && docker-compose up -d")
-        print("  2. Check if Neo4j is running: docker-compose ps")
-        print("  3. Check Neo4j logs: docker-compose logs neo4j")
+        print("  1. Start Neo4j: docker compose up -d")
+        print("  2. Check if Neo4j is running: docker compose ps")
+        print("  3. Check Neo4j logs: docker compose logs neo4j")
         print(f"\nError details: {e}\n")
         sys.exit(1)
         

@@ -10,5 +10,6 @@
 
 MATCH (n)
 WHERE n.npi = '1234567890'
+   OR '1234567890' IN n.npis
 MATCH path = (n)--(connected)
 RETURN path;

@@ -1,5 +1,8 @@
 # Neo4j FHIR Import Improvements - Summary
 
+> This is a historical implementation summary. For current setup, supported
+> formats, and graph behavior, see [README_neo4j.md](README_neo4j.md).
+
 ## Overview
 
 The Neo4j FHIR import system has been comprehensively updated to improve data modeling based on the specifications in `AI_Instructions/ImproveNeo4JModel.md`.
@@ -168,12 +171,15 @@ RETURN e.FHIR_address, e.Direct_address, r.rank
 ORDER BY r.rank
 ```
 
-### Query addresses properly:
+### Return serialized practitioner addresses:
 ```cypher
 MATCH (p:Practitioner)
-WHERE ANY(addr IN p.addresses WHERE addr.state = 'WY')
+WHERE p.addresses CONTAINS '"state": "WY"'
 RETURN p.name, p.addresses
 ```
+
+`addresses` is a JSON string, not an array of Neo4j maps. Parse it in an
+application for robust field-level filtering.
 
 ### Find email vs FHIR endpoints:
 ```cypher
@@ -209,19 +215,19 @@ The implementation has been validated against the example files in `data/example
 
 ## Files Modified
 
-1. `analysis_neo4j/scripts/importers/base.py`
-2. `analysis_neo4j/scripts/importers/practitioner.py`
-3. `analysis_neo4j/scripts/importers/organization.py`
-4. `analysis_neo4j/scripts/importers/endpoint.py`
-5. `analysis_neo4j/scripts/importers/location.py`
-6. `analysis_neo4j/scripts/importers/practitioner_role.py`
-7. `analysis_neo4j/scripts/importers/organization_affiliation.py`
+1. `scripts/importers/base.py`
+2. `scripts/importers/practitioner.py`
+3. `scripts/importers/organization.py`
+4. `scripts/importers/endpoint.py`
+5. `scripts/importers/location.py`
+6. `scripts/importers/practitioner_role.py`
+7. `scripts/importers/organization_affiliation.py`
 
 ## Next Steps
 
 1. **Reset Database**: `docker-compose down -v && docker-compose up -d`
 2. **Recreate Indexes**: Run `schema/indexes.cypher`
-3. **Re-import Data**: `python scripts/import_ndjson.py /path/to/data`
+3. **Re-import Data**: `python scripts/import_or_update_ndjson.py /path/to/data`
 4. **Test Queries**: Use the example queries above to verify data structure
 
 ## Date Completed

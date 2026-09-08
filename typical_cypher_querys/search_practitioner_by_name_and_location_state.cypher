@@ -14,7 +14,7 @@
 
 MATCH (p:Practitioner)-[:HAS_ROLE]->(pr:PractitionerRole)-[:AT_LOCATION]->(l:Location)
 WHERE p.name CONTAINS 'Smith'
-  AND l.state = 'CA'
+  AND l.address CONTAINS '"state": "CA"'
 MATCH path = (p)--(connected)
 RETURN path
 LIMIT 50;

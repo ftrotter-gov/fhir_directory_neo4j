@@ -1,5 +1,9 @@
 # Neo4j Import Performance Optimization
 
+> This document records performance guidance for the current importers. FHIR
+> NDJSON, Bundle JSON, and single-resource JSON are supported. CMS
+> machine-readable JSON import is not yet implemented.
+
 ## Current Performance Issue
 
 Importing is currently very slow (~1.9 seconds per record). This document outlines the bottlenecks and solutions.
@@ -12,7 +16,7 @@ The most critical issue. Without proper indexes, MERGE operations are extremely 
 **Solution:**
 ```bash
 # First, ensure indexes are created BEFORE importing data
-docker exec -it analysis_neo4j-neo4j-1 cypher-shell -u neo4j -p your_password < schema/indexes.cypher
+docker exec -i fhir_neo4j_analysis cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" < schema/indexes.cypher
 ```
 
 ### 2. **Batch Size Too Small**
@@ -21,8 +25,8 @@ Default batch size of 1000 may be too conservative.
 **Solution:**
 ```bash
 # Try larger batch sizes
-python scripts/import_ndjson.py /path/to/data --batch-size 5000
-python scripts/import_ndjson.py /path/to/data --batch-size 10000
+python scripts/import_or_update_ndjson.py /path/to/data --batch-size 5000
+python scripts/import_or_update_ndjson.py /path/to/data --batch-size 10000
 ```
 
 ### 3. **Relationship Creation During Node Import**
@@ -37,27 +41,30 @@ Creating relationships (especially to Endpoints that don't exist yet) slows down
 ### Step 1: Prepare Database
 ```bash
 # Start Neo4j
-cd analysis_neo4j
 docker-compose up -d
 
 # Wait for Neo4j to start (30 seconds)
 sleep 30
 
 # Create indexes and constraints
-docker exec -it analysis_neo4j-neo4j-1 cypher-shell -u neo4j -p your_password < schema/indexes.cypher
+docker exec -i fhir_neo4j_analysis cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" < schema/indexes.cypher
 ```
 
 ### Step 2: Import Nodes Only (Fast)
 ```bash
 # Import with large batch size
-python scripts/import_ndjson.py /path/to/data --batch-size 10000
+python scripts/import_ndjson_fast.py /path/to/data --batch-size 10000
 
 # Or test with limit first
-python scripts/import_ndjson.py /path/to/data --batch-size 10000 --limit 1000
+python scripts/import_ndjson_fast.py /path/to/data --batch-size 10000 --limit 1000
 ```
 
-### Step 3: Create Relationships (Optional Second Pass)
-If needed, create a separate script to build relationships after all nodes are loaded.
+### Step 3: Reconcile Relationships When Needed
+
+Relationships are created during import. References to nodes that have not yet
+been loaded do not create relationships. After all nodes exist, rerun the safe
+importer to fill many missing relationships. A dedicated second-pass script is
+not currently implemented.
 
 ## Performance Benchmarks
 
@@ -74,7 +81,7 @@ If needed, create a separate script to build relationships after all nodes are l
 
 ```bash
 # Test with 100 records
-python scripts/import_ndjson.py /path/to/data --limit 100 --batch-size 100
+python scripts/import_or_update_ndjson.py /path/to/data --limit 100 --batch-size 100
 
 # If this takes >10 seconds, indexes are missing or not being used
 ```
@@ -112,20 +119,10 @@ If available, APOC procedures can speed up imports significantly.
 
 ## Alternative: CSV Import (Fastest)
 
-For very large datasets, consider exporting to CSV first, then using Neo4j's native CSV import:
-
-```bash
-# 1. Export NDJSON to CSV
-python scripts/export_to_csv.py /path/to/data
-
-# 2. Use neo4j-admin import (offline, fastest)
-docker exec analysis_neo4j-neo4j-1 neo4j-admin database import full \
-  --nodes=Practitioner=practitioners.csv \
-  --nodes=Organization=organizations.csv \
-  --relationships=HAS_ROLE=roles.csv
-```
-
-This can be 10-100x faster than Cypher imports.
+For very large datasets, Neo4j's offline native bulk importer may be faster
+than Cypher imports. This repository does not currently include the required
+FHIR-to-Neo4j bulk-file exporter, so this is a possible future optimization
+rather than an available workflow.
 
 ## Monitoring Import Progress
 
