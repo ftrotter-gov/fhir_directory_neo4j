@@ -201,7 +201,7 @@ across all files discovered for each resource type.
 ## File Discovery and Format Detection
 
 The importer scans the supplied directory, but not its subdirectories, for
-`*.ndjson` and `*.json` files.
+`*.ndjson`, `*.json`, and extensionless endpoint-cache files.
 
 ### Name-based matching
 
@@ -213,10 +213,17 @@ include:
 - `payer_PractitionerRoles-3.json`
 - `OrganizationAffiliations.json`
 - `HealthcareServices.json`
+- `Organization`
+- `PractitionerRole`
 
 Multiple files can map to the same resource type and are imported in sorted
 filename order. Avoid ambiguous dot-separated names such as
 `Practitioner.Role.ndjson` and `Organization.Affiliation.ndjson`.
+
+Extensionless files are always content-validated. Their FHIR resource type must
+match the type implied by the filename. This supports HTTP response caches that
+store endpoint names such as `Organization` without adding `.json`, while
+preventing misleading filenames from routing the wrong resource importer.
 
 ### Content detection
 
@@ -228,6 +235,33 @@ Unmatched JSON filenames are inspected to identify:
 
 FHIR Bundles are unpacked from `entry[].resource`. Each importer filters input
 to its own FHIR `resourceType`.
+
+### FHIR container parsing
+
+All JSON input paths use the same bounded FHIR resource parser. It traverses
+only standard FHIR container fields rather than searching arbitrary nested JSON:
+
+- Direct FHIR resources are processed normally.
+- Every `Bundle.entry[].resource` is inspected, including mixed-resource
+  search Bundles.
+- `Parameters.parameter[].resource` and recursively nested `part[].resource`
+  are inspected.
+- `OperationOutcome.issue[]` entries are reported as structured diagnostics;
+  valid resources elsewhere in the response continue to be processed.
+- `contained[]` resources are identified with their container context but are
+  not imported as independently addressable graph nodes.
+- Recursion has a configured maximum depth to prevent malformed payloads from
+  causing unbounded traversal.
+
+For searchset Bundles, `entry.search.mode` context is preserved by the parser.
+A `next` link produces a warning because a cached response may represent only
+one page of a larger result. Importing one page does not follow or download the
+remaining pages automatically.
+
+`OperationOutcome` is a diagnostic FHIR resource, not a generic wrapper. A
+top-level outcome with only `issue[]` yields diagnostics and no directory
+resource. If an outcome has standard `contained[]` resources, they are found
+but remain non-independent contained resources.
 
 ### Source classification
 

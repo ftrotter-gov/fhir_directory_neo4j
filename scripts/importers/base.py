@@ -17,6 +17,7 @@ import time
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from neo4j import GraphDatabase, Session
+from .fhir_parser import FHIRParser
 from .registry import FileFormat, detect_format, get_source_format_string
 
 
@@ -359,12 +360,27 @@ class BaseImporter:
                 if not line:
                     continue
                 try:
-                    record = json.loads(line)
-                    resource_type = record.get('resourceType')
-                    if resource_type != self.RESOURCE_TYPE:
-                        self._log(message=f"Warning: Line {line_num} has resourceType '{resource_type}', expected '{self.RESOURCE_TYPE}'")
+                    payload = json.loads(line)
+                    parse_result = FHIRParser.extract_resources(payload=payload)
+                    for diagnostic in parse_result.diagnostics:
+                        self._log(
+                            message=(
+                                f"FHIR {diagnostic.severity} [{diagnostic.code}] on line "
+                                f"{line_num} at {diagnostic.source_path}: "
+                                f"{diagnostic.message}"
+                            )
+                        )
+                    matching_records = [
+                        resource_record.resource
+                        for resource_record in parse_result.resources
+                        if resource_record.resource_type == self.RESOURCE_TYPE
+                        and not resource_record.is_contained
+                    ]
+                    if not matching_records:
+                        resource_type = payload.get('resourceType') if isinstance(payload, dict) else None
+                        self._log(message=f"Warning: Line {line_num} has no importable {self.RESOURCE_TYPE} resource (outer resourceType='{resource_type}')")
                         continue
-                    records.append(record)
+                    records.extend(matching_records)
                 except json.JSONDecodeError as e:
                     errors += 1
                     self._log(message=f"Error parsing line {line_num}: {e}")
@@ -399,21 +415,27 @@ class BaseImporter:
             self._log(message=f"Warning: {filepath.name} is not a Bundle (resourceType='{bundle.get('resourceType')}'), skipping")
             return records
 
-        entries = bundle.get('entry', [])
+        parse_result = FHIRParser.extract_resources(payload=bundle)
+        for diagnostic in parse_result.diagnostics:
+            self._log(
+                message=(
+                    f"FHIR {diagnostic.severity} [{diagnostic.code}] at "
+                    f"{diagnostic.source_path}: {diagnostic.message}"
+                )
+            )
+
         skipped = 0
-        for entry in entries:
-            if not isinstance(entry, dict):
+        contained = 0
+        for resource_record in parse_result.resources:
+            if resource_record.is_contained:
+                contained += 1
                 continue
-            resource = entry.get('resource', {})
-            if not isinstance(resource, dict):
-                continue
-            resource_type = resource.get('resourceType')
-            if resource_type != self.RESOURCE_TYPE:
+            if resource_record.resource_type != self.RESOURCE_TYPE:
                 skipped += 1
                 continue
-            records.append(resource)
+            records.append(resource_record.resource)
 
-        self._log(message=f"Read {len(records)} valid {self.RESOURCE_TYPE} resources from bundle ({skipped} skipped)")
+        self._log(message=f"Read {len(records)} valid {self.RESOURCE_TYPE} resources from bundle ({skipped} other types and {contained} contained resources skipped)")
         return records
 
     def read_file(self, *, filepath: Path) -> List[Dict[str, Any]]:
@@ -435,7 +457,8 @@ class BaseImporter:
             return self.read_json_bundle(filepath=filepath)
 
         if file_format in (FileFormat.FHIR_NDJSON, FileFormat.UNKNOWN):
-            # Fall back to NDJSON for unknown -- catches single-resource JSON too
+            # NDJSON lines and single-resource JSON may themselves be standard
+            # FHIR containers such as Parameters or OperationOutcome.
             return self.read_ndjson(filepath=filepath)
 
         self._log(message=f"Warning: {filepath.name} appears to be a non-FHIR format (MR JSON?), skipping in FHIR importer")

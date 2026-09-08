@@ -71,15 +71,15 @@ def detect_format(filepath: Path) -> FileFormat:
 
     Logic:
       .ndjson  -> FHIR_NDJSON
-      .json, first char '[' -> MR_JSON
-      .json, first char '{', resourceType == "Bundle" -> FHIR_BUNDLE
-      .json, first char '{', other resourceType -> FHIR_NDJSON (single resource)
+      .json or extensionless, first char '[' -> MR_JSON
+      .json or extensionless, resourceType == "Bundle" -> FHIR_BUNDLE
+      .json or extensionless, other resourceType -> FHIR_NDJSON (single resource)
       anything else -> UNKNOWN
     """
     suffix = filepath.suffix.lower()
     if suffix == ".ndjson":
         return FileFormat.FHIR_NDJSON
-    if suffix != ".json":
+    if suffix not in ("", ".json"):
         return FileFormat.UNKNOWN
     try:
         with open(filepath, "r", encoding="utf-8") as fh:

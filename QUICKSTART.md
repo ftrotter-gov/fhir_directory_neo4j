@@ -100,17 +100,22 @@ python scripts/import_or_update_ndjson.py /path/to/directory \
 
 ## Accepted Input Files
 
-Discovery scans one directory for `*.ndjson` and `*.json`. It supports multiple
-files per resource type and common names such as:
+Discovery scans one directory for `*.ndjson`, `*.json`, and extensionless FHIR
+endpoint-cache files. It supports multiple files per resource type and common
+names such as:
 
 - `Practitioner.ndjson`
 - `Practitioners-1.json`
 - `payer_PractitionerRoles-3.json`
 - `OrganizationAffiliation.ndjson`
 - `HealthcareServices.json`
+- `Organization`
+- `PractitionerRole`
 
-Unrecognized JSON filenames are content-sniffed. FHIR Bundles are unpacked
-from `entry[].resource`. Source profiles are used to label nodes as
+Unrecognized JSON filenames and extensionless files are content-sniffed.
+Extensionless files are accepted only when their FHIR content matches the
+resource type implied by the filename. FHIR Bundles are unpacked from
+`entry[].resource`. Source profiles are used to label nodes as
 `fhir_ndh`, `fhir_plannet`, or `fhir_unknown`.
 
 CMS machine-readable top-level JSON arrays are detected, but the importer
