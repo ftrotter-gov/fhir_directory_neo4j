@@ -9,10 +9,17 @@ from .base import BaseImporter, _to_json_string
 
 class PractitionerImporter(BaseImporter):
     """Import Practitioner resources into Neo4j."""
-    
+
     RESOURCE_TYPE = "Practitioner"
     NODE_LABEL = "Practitioner"
-    
+
+    def __init__(self, *, neo4j_uri, neo4j_user, neo4j_password,
+                 import_tag=None, use_create=False, source_format="fhir_unknown"):
+        super().__init__(neo4j_uri=neo4j_uri, neo4j_user=neo4j_user,
+                         neo4j_password=neo4j_password, import_tag=import_tag,
+                         use_create=use_create)
+        self.source_format = source_format
+
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
         Import a batch of Practitioner resources.
@@ -69,23 +76,25 @@ class PractitionerImporter(BaseImporter):
             endpoint_refs = self._extract_endpoint_references(resource=resource)
             
             practitioner_data.append({
-                'fhir_id': fhir_id,
-                'resource_type': self.RESOURCE_TYPE,
-                'name': name_str,
-                'active': active,
-                'gender': gender,
-                'npi': npi,
-                'identifiers': _to_json_string(obj=identifiers),
-                'addresses': _to_json_string(obj=addresses),
-                'emails': telecoms['emails'],
-                'phones': telecoms['phones'],
-                'faxes': telecoms['faxes'],
-                'specialties': qual_data['specialties'],
-                'degrees': qual_data['degrees'],
-                'licenses': _to_json_string(obj=qual_data['licenses']),
-                'languages_spoken': languages_spoken,
+                'fhir_id':            fhir_id,
+                'primary_key':        fhir_id,
+                'source_format':      self.source_format,
+                'resource_type':      self.RESOURCE_TYPE,
+                'name':               name_str,
+                'active':             active,
+                'gender':             gender,
+                'npi':                npi,
+                'identifiers':        _to_json_string(obj=identifiers),
+                'addresses':          _to_json_string(obj=addresses),
+                'emails':             telecoms['emails'],
+                'phones':             telecoms['phones'],
+                'faxes':              telecoms['faxes'],
+                'specialties':        qual_data['specialties'],
+                'degrees':            qual_data['degrees'],
+                'licenses':           _to_json_string(obj=qual_data['licenses']),
+                'languages_spoken':   languages_spoken,
                 'endpoint_references': endpoint_refs,
-                'import_tag': self.import_tag,
+                'import_tag':         self.import_tag,
             })
         
         if not practitioner_data:
@@ -93,48 +102,50 @@ class PractitionerImporter(BaseImporter):
         
         # Use CREATE or MERGE based on mode
         if self.use_create:
-            # Fast mode: CREATE (not idempotent, but much faster)
             query = """
             UNWIND $batch AS prac
             CREATE (p:Practitioner {
-                fhir_id: prac.fhir_id,
-                import_tag: prac.import_tag,
-                resource_type: prac.resource_type,
-                name: prac.name,
-                active: prac.active,
-                gender: prac.gender,
-                npi: prac.npi,
-                identifiers: prac.identifiers,
-                addresses: prac.addresses,
-                emails: prac.emails,
-                phones: prac.phones,
-                faxes: prac.faxes,
-                specialties: prac.specialties,
-                degrees: prac.degrees,
-                licenses: prac.licenses,
+                primary_key:      prac.primary_key,
+                fhir_id:          prac.fhir_id,
+                import_tag:       prac.import_tag,
+                source_format:    prac.source_format,
+                resource_type:    prac.resource_type,
+                name:             prac.name,
+                active:           prac.active,
+                gender:           prac.gender,
+                npi:              prac.npi,
+                identifiers:      prac.identifiers,
+                addresses:        prac.addresses,
+                emails:           prac.emails,
+                phones:           prac.phones,
+                faxes:            prac.faxes,
+                specialties:      prac.specialties,
+                degrees:          prac.degrees,
+                licenses:         prac.licenses,
                 languages_spoken: prac.languages_spoken
             })
             RETURN count(p) AS count
             """
         else:
-            # Safe mode: MERGE (idempotent, but slower)
             query = """
             UNWIND $batch AS prac
-            MERGE (p:Practitioner {fhir_id: prac.fhir_id})
+            MERGE (p:Practitioner {primary_key: prac.primary_key})
             ON CREATE SET p.import_tag = prac.import_tag
-            SET p.resource_type = prac.resource_type,
-                p.name = prac.name,
-                p.active = prac.active,
-                p.gender = prac.gender,
-                p.npi = prac.npi,
-                p.identifiers = prac.identifiers,
-                p.addresses = prac.addresses,
-                p.emails = prac.emails,
-                p.phones = prac.phones,
-                p.faxes = prac.faxes,
-                p.specialties = prac.specialties,
-                p.degrees = prac.degrees,
-                p.licenses = prac.licenses,
+            SET p.fhir_id          = prac.fhir_id,
+                p.source_format    = prac.source_format,
+                p.resource_type    = prac.resource_type,
+                p.name             = prac.name,
+                p.active           = prac.active,
+                p.gender           = prac.gender,
+                p.npi              = prac.npi,
+                p.identifiers      = prac.identifiers,
+                p.addresses        = prac.addresses,
+                p.emails           = prac.emails,
+                p.phones           = prac.phones,
+                p.faxes            = prac.faxes,
+                p.specialties      = prac.specialties,
+                p.degrees          = prac.degrees,
+                p.licenses         = prac.licenses,
                 p.languages_spoken = prac.languages_spoken
             RETURN count(p) AS count
             """

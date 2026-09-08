@@ -9,10 +9,17 @@ from .base import BaseImporter, _to_json_string
 
 class EndpointImporter(BaseImporter):
     """Import Endpoint resources into Neo4j."""
-    
+
     RESOURCE_TYPE = "Endpoint"
     NODE_LABEL = "Endpoint"
-    
+
+    def __init__(self, *, neo4j_uri, neo4j_user, neo4j_password,
+                 import_tag=None, use_create=False, source_format="fhir_unknown"):
+        super().__init__(neo4j_uri=neo4j_uri, neo4j_user=neo4j_user,
+                         neo4j_password=neo4j_password, import_tag=import_tag,
+                         use_create=use_create)
+        self.source_format = source_format
+
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
         Import a batch of Endpoint resources.
@@ -59,15 +66,17 @@ class EndpointImporter(BaseImporter):
             managing_org_id = self._parse_reference(reference=managing_org_reference)
             
             endpoint_data.append({
-                'fhir_id': fhir_id,
-                'resource_type': self.RESOURCE_TYPE,
-                'status': status,
-                'FHIR_address': fhir_address,
-                'Direct_address': direct_address,
-                'rank': rank,
-                'identifiers': _to_json_string(obj=identifiers),
+                'fhir_id':                fhir_id,
+                'primary_key':            fhir_id,
+                'source_format':          self.source_format,
+                'resource_type':          self.RESOURCE_TYPE,
+                'status':                 status,
+                'FHIR_address':           fhir_address,
+                'Direct_address':         direct_address,
+                'rank':                   rank,
+                'identifiers':            _to_json_string(obj=identifiers),
                 'managing_organization_id': managing_org_id,
-                'import_tag': self.import_tag,
+                'import_tag':             self.import_tag,
             })
         
         # Batch import nodes - use CREATE or MERGE based on mode
@@ -75,14 +84,16 @@ class EndpointImporter(BaseImporter):
             query = """
             UNWIND $batch AS ep
             CREATE (e:Endpoint {
-                fhir_id: ep.fhir_id,
-                import_tag: ep.import_tag,
-                resource_type: ep.resource_type,
-                status: ep.status,
-                FHIR_address: ep.FHIR_address,
+                primary_key:    ep.primary_key,
+                fhir_id:        ep.fhir_id,
+                import_tag:     ep.import_tag,
+                source_format:  ep.source_format,
+                resource_type:  ep.resource_type,
+                status:         ep.status,
+                FHIR_address:   ep.FHIR_address,
                 Direct_address: ep.Direct_address,
-                rank: ep.rank,
-                identifiers: ep.identifiers,
+                rank:           ep.rank,
+                identifiers:    ep.identifiers,
                 managing_organization_reference: ep.managing_organization_id
             })
             RETURN count(e) AS count
@@ -90,14 +101,16 @@ class EndpointImporter(BaseImporter):
         else:
             query = """
             UNWIND $batch AS ep
-            MERGE (e:Endpoint {fhir_id: ep.fhir_id})
+            MERGE (e:Endpoint {primary_key: ep.primary_key})
             ON CREATE SET e.import_tag = ep.import_tag
-            SET e.resource_type = ep.resource_type,
-                e.status = ep.status,
-                e.FHIR_address = ep.FHIR_address,
+            SET e.fhir_id        = ep.fhir_id,
+                e.source_format  = ep.source_format,
+                e.resource_type  = ep.resource_type,
+                e.status         = ep.status,
+                e.FHIR_address   = ep.FHIR_address,
                 e.Direct_address = ep.Direct_address,
-                e.rank = ep.rank,
-                e.identifiers = ep.identifiers,
+                e.rank           = ep.rank,
+                e.identifiers    = ep.identifiers,
                 e.managing_organization_reference = ep.managing_organization_id
             RETURN count(e) AS count
             """

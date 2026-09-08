@@ -20,7 +20,6 @@ import sys
 import argparse
 from pathlib import Path
 from typing import Dict, Type, List, Optional
-import glob
 
 # Import all resource importers
 from importers import (
@@ -31,6 +30,9 @@ from importers import (
     OrganizationAffiliationImporter,
     EndpointImporter,
     LocationImporter,
+    HealthcareServiceImporter,
+    discover_fhir_files,
+    get_source_format_string,
 )
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -38,12 +40,13 @@ from neo4j.exceptions import ServiceUnavailable, AuthError
 
 # Map resource types to their importers
 IMPORTER_MAP: Dict[str, Type[BaseImporter]] = {
-    'Practitioner': PractitionerImporter,
-    'PractitionerRole': PractitionerRoleImporter,
-    'Organization': OrganizationImporter,
+    'Practitioner':            PractitionerImporter,
+    'PractitionerRole':        PractitionerRoleImporter,
+    'Organization':            OrganizationImporter,
     'OrganizationAffiliation': OrganizationAffiliationImporter,
-    'Endpoint': EndpointImporter,
-    'Location': LocationImporter,
+    'Endpoint':                EndpointImporter,
+    'Location':                LocationImporter,
+    'HealthcareService':       HealthcareServiceImporter,
 }
 
 
@@ -220,71 +223,74 @@ def check_neo4j_connection(*, config: Dict[str, str]) -> bool:
         sys.exit(1)
 
 
-def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
+def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
     """
-    Import all discovered NDJSON files into Neo4j.
-    
+    Import all discovered FHIR files into Neo4j.
+
     Args:
-        files: Dictionary mapping resource type to file path
+        files:      Dict mapping resource type -> list of file paths.
+                    Special key '__mr__' holds MR JSON files (skipped here with a warning).
         batch_size: Number of records to process per batch
         import_tag: Optional tag to identify this import run (only set on new nodes)
-        limit: Optional limit on number of records to import per resource type
+        limit:      Optional limit on number of records to import per resource type
     """
     if not files:
-        print("No FHIR NDJSON files found to import.")
+        print("No FHIR files found to import.")
         return
-    
-    # Load Neo4j configuration
+
+    if '__mr__' in files:
+        print(f"\nNote: {len(files['__mr__'])} MR JSON file(s) found but MR import is not yet implemented.")
+        print("      These files will be skipped: " + ", ".join(f.name for f in files['__mr__']))
+
     config = load_neo4j_config()
-    
-    # Check Neo4j connection before proceeding
     check_neo4j_connection(config=config)
-    
-    print(f"Importing {len(files)} resource types with batch size {batch_size}\n")
-    
-    # Import order matters for relationship creation
-    # Import base resources before resources that reference them
+
+    fhir_types = {k: v for k, v in files.items() if k != '__mr__'}
+    print(f"Importing {len(fhir_types)} resource types with batch size {batch_size}\n")
+
+    # Import order: base resources before resources that reference them
     import_order = [
-        'Practitioner',      # Base resource
-        'Organization',      # Base resource
-        'Location',          # Base resource
-        'Endpoint',          # Base resource
-        'PractitionerRole',  # References Practitioner, Organization, Location, Endpoint
-        'OrganizationAffiliation',  # References Organization, Location, Endpoint
+        'Practitioner',
+        'Organization',
+        'Location',
+        'Endpoint',
+        'HealthcareService',       # References Organization, Location
+        'PractitionerRole',        # References Practitioner, Organization, Location, Endpoint
+        'OrganizationAffiliation', # References Organization, Location, Endpoint
     ]
-    
-    # Import in the specified order
+
     for resource_type in import_order:
-        if resource_type not in files:
+        if resource_type not in fhir_types:
             print(f"Skipping {resource_type} (not found)")
             continue
-        
-        filepath = files[resource_type]
+
+        filepaths = fhir_types[resource_type]
         importer_class = IMPORTER_MAP[resource_type]
-        
+
         print(f"\n{'='*60}")
-        print(f"Importing {resource_type}")
+        print(f"Importing {resource_type} ({len(filepaths)} file(s))")
         print(f"{'='*60}")
-        
-        try:
-            importer = importer_class(
-                neo4j_uri=config['uri'],
-                neo4j_user=config['user'],
-                neo4j_password=config['password'],
-                import_tag=import_tag,
-                use_create=True  # FAST MODE: Use CREATE instead of MERGE
-            )
-            
-            importer.import_file(filepath=filepath, batch_size=batch_size, limit=limit)
-            importer.close()
-            
-            print(f"✓ Successfully imported {resource_type}")
-            
-        except Exception as e:
-            print(f"✗ Error importing {resource_type}: {e}")
-            import traceback
-            traceback.print_exc()
-    
+
+        for filepath in filepaths:
+            source_format = get_source_format_string(filepath)
+            print(f"  File: {filepath.name}  [source_format={source_format}]")
+            try:
+                importer = importer_class(
+                    neo4j_uri=config['uri'],
+                    neo4j_user=config['user'],
+                    neo4j_password=config['password'],
+                    import_tag=import_tag,
+                    use_create=True,
+                    source_format=source_format,
+                )
+                importer.import_file(filepath=filepath, batch_size=batch_size, limit=limit)
+                importer.close()
+                print(f"  ✓ {filepath.name}")
+            except Exception as e:
+                print(f"  ✗ Error importing {filepath.name}: {e}")
+                import traceback
+                traceback.print_exc()
+
     print(f"\n{'='*60}")
     print("Import completed!")
     print(f"{'='*60}\n")
@@ -376,13 +382,13 @@ File Naming:
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
     
-    # Discover NDJSON files
+    # Discover FHIR files (NDJSON, Bundle JSON, and MR JSON)
     print(f"Scanning directory: {args.directory}\n")
-    files = discover_ndjson_files(directory=args.directory)
-    
+    files = discover_fhir_files(directory=args.directory)
+
     if not files:
-        print("\nNo supported FHIR NDJSON files found.")
-        print("Expected filenames: Practitioner.ndjson, Organization.ndjson, etc.")
+        print("\nNo supported FHIR files found.")
+        print("Supported formats: *.ndjson (FHIR NDJSON), *.json (FHIR Bundle or MR JSON)")
         sys.exit(1)
     
     # Import files

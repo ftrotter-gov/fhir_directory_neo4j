@@ -9,10 +9,17 @@ from .base import BaseImporter, _to_json_string
 
 class LocationImporter(BaseImporter):
     """Import Location resources into Neo4j."""
-    
+
     RESOURCE_TYPE = "Location"
     NODE_LABEL = "Location"
-    
+
+    def __init__(self, *, neo4j_uri, neo4j_user, neo4j_password,
+                 import_tag=None, use_create=False, source_format="fhir_unknown"):
+        super().__init__(neo4j_uri=neo4j_uri, neo4j_user=neo4j_user,
+                         neo4j_password=neo4j_password, import_tag=import_tag,
+                         use_create=use_create)
+        self.source_format = source_format
+
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
         Import a batch of Location resources.
@@ -110,58 +117,64 @@ class LocationImporter(BaseImporter):
                             endpoint_ids.append(ep_id)
             
             location_data.append({
-                'fhir_id': fhir_id,
-                'resource_type': self.RESOURCE_TYPE,
-                'status': status,
-                'name': name,
+                'fhir_id':        fhir_id,
+                'primary_key':    fhir_id,
+                'source_format':  self.source_format,
+                'resource_type':  self.RESOURCE_TYPE,
+                'status':         status,
+                'name':           name,
                 'location_types': location_types,
-                'address': _to_json_string(obj=address),
-                'latitude': latitude,
-                'longitude': longitude,
+                'address':        _to_json_string(obj=address),
+                'latitude':       latitude,
+                'longitude':      longitude,
                 'managing_organization_id': managing_org_id,
-                'part_of_id': part_of_id,
-                'endpoint_ids': endpoint_ids,
-                'identifiers': _to_json_string(obj=identifiers),
-                'import_tag': self.import_tag,
+                'part_of_id':     part_of_id,
+                'endpoint_ids':   endpoint_ids,
+                'identifiers':    _to_json_string(obj=identifiers),
+                'import_tag':     self.import_tag,
             })
-        
+
         # Batch import nodes - use CREATE or MERGE based on mode
         if self.use_create:
             query = """
             UNWIND $batch AS loc
             CREATE (l:Location {
-                fhir_id: loc.fhir_id,
-                import_tag: loc.import_tag,
-                resource_type: loc.resource_type,
-                status: loc.status,
-                name: loc.name,
+                primary_key:    loc.primary_key,
+                fhir_id:        loc.fhir_id,
+                import_tag:     loc.import_tag,
+                source_format:  loc.source_format,
+                resource_type:  loc.resource_type,
+                status:         loc.status,
+                name:           loc.name,
                 location_types: loc.location_types,
-                address: loc.address,
-                latitude: loc.latitude,
-                longitude: loc.longitude,
+                address:        loc.address,
+                latitude:       loc.latitude,
+                longitude:      loc.longitude,
                 managing_organization_reference: loc.managing_organization_id,
-                part_of_reference: loc.part_of_id,
+                part_of_reference:   loc.part_of_id,
                 endpoint_references: loc.endpoint_ids,
-                identifiers: loc.identifiers
+                identifiers:    loc.identifiers
             })
             RETURN count(l) AS count
             """
         else:
             query = """
             UNWIND $batch AS loc
-            MERGE (l:Location {fhir_id: loc.fhir_id})
+            MERGE (l:Location {primary_key: loc.primary_key})
             ON CREATE SET l.import_tag = loc.import_tag
-            SET l.resource_type = loc.resource_type,
-                l.status = loc.status,
-                l.name = loc.name,
+            SET l.fhir_id        = loc.fhir_id,
+                l.source_format  = loc.source_format,
+                l.resource_type  = loc.resource_type,
+                l.status         = loc.status,
+                l.name           = loc.name,
                 l.location_types = loc.location_types,
-                l.address = loc.address,
-                l.latitude = loc.latitude,
-                l.longitude = loc.longitude,
+                l.address        = loc.address,
+                l.latitude       = loc.latitude,
+                l.longitude      = loc.longitude,
                 l.managing_organization_reference = loc.managing_organization_id,
-                l.part_of_reference = loc.part_of_id,
+                l.part_of_reference   = loc.part_of_id,
                 l.endpoint_references = loc.endpoint_ids,
-                l.identifiers = loc.identifiers
+                l.identifiers    = loc.identifiers
             RETURN count(l) AS count
             """
         

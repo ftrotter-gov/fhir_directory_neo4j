@@ -9,10 +9,17 @@ from .base import BaseImporter, _to_json_string
 
 class OrganizationImporter(BaseImporter):
     """Import Organization resources into Neo4j."""
-    
+
     RESOURCE_TYPE = "Organization"
     NODE_LABEL = "Organization"
-    
+
+    def __init__(self, *, neo4j_uri, neo4j_user, neo4j_password,
+                 import_tag=None, use_create=False, source_format="fhir_unknown"):
+        super().__init__(neo4j_uri=neo4j_uri, neo4j_user=neo4j_user,
+                         neo4j_password=neo4j_password, import_tag=import_tag,
+                         use_create=use_create)
+        self.source_format = source_format
+
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
         Import a batch of Organization resources.
@@ -78,20 +85,22 @@ class OrganizationImporter(BaseImporter):
                             endpoint_ids.append(ep_id)
             
             org_data.append({
-                'fhir_id': fhir_id,
+                'fhir_id':       fhir_id,
+                'primary_key':   fhir_id,
+                'source_format': self.source_format,
                 'resource_type': self.RESOURCE_TYPE,
-                'name': name,
-                'active': active,
-                'org_types': org_types,
-                'npis': npis,
-                'identifiers': _to_json_string(obj=identifiers),
-                'addresses': _to_json_string(obj=addresses),
-                'emails': telecoms['emails'],
-                'phones': telecoms['phones'],
-                'faxes': telecoms['faxes'],
-                'part_of_id': part_of_id,
-                'endpoint_ids': endpoint_ids,
-                'import_tag': self.import_tag,
+                'name':          name,
+                'active':        active,
+                'org_types':     org_types,
+                'npis':          npis,
+                'identifiers':   _to_json_string(obj=identifiers),
+                'addresses':     _to_json_string(obj=addresses),
+                'emails':        telecoms['emails'],
+                'phones':        telecoms['phones'],
+                'faxes':         telecoms['faxes'],
+                'part_of_id':    part_of_id,
+                'endpoint_ids':  endpoint_ids,
+                'import_tag':    self.import_tag,
             })
         
         # Batch import nodes - use CREATE or MERGE based on mode
@@ -99,19 +108,21 @@ class OrganizationImporter(BaseImporter):
             query = """
             UNWIND $batch AS org
             CREATE (o:Organization {
-                fhir_id: org.fhir_id,
-                import_tag: org.import_tag,
-                resource_type: org.resource_type,
-                name: org.name,
-                active: org.active,
-                org_types: org.org_types,
-                npis: org.npis,
-                identifiers: org.identifiers,
-                addresses: org.addresses,
-                emails: org.emails,
-                phones: org.phones,
-                faxes: org.faxes,
-                part_of_reference: org.part_of_id,
+                primary_key:         org.primary_key,
+                fhir_id:             org.fhir_id,
+                import_tag:          org.import_tag,
+                source_format:       org.source_format,
+                resource_type:       org.resource_type,
+                name:                org.name,
+                active:              org.active,
+                org_types:           org.org_types,
+                npis:                org.npis,
+                identifiers:         org.identifiers,
+                addresses:           org.addresses,
+                emails:              org.emails,
+                phones:              org.phones,
+                faxes:               org.faxes,
+                part_of_reference:   org.part_of_id,
                 endpoint_references: org.endpoint_ids
             })
             RETURN count(o) AS count
@@ -119,19 +130,21 @@ class OrganizationImporter(BaseImporter):
         else:
             query = """
             UNWIND $batch AS org
-            MERGE (o:Organization {fhir_id: org.fhir_id})
+            MERGE (o:Organization {primary_key: org.primary_key})
             ON CREATE SET o.import_tag = org.import_tag
-            SET o.resource_type = org.resource_type,
-                o.name = org.name,
-                o.active = org.active,
-                o.org_types = org.org_types,
-                o.npis = org.npis,
-                o.identifiers = org.identifiers,
-                o.addresses = org.addresses,
-                o.emails = org.emails,
-                o.phones = org.phones,
-                o.faxes = org.faxes,
-                o.part_of_reference = org.part_of_id,
+            SET o.fhir_id             = org.fhir_id,
+                o.source_format       = org.source_format,
+                o.resource_type       = org.resource_type,
+                o.name                = org.name,
+                o.active              = org.active,
+                o.org_types           = org.org_types,
+                o.npis                = org.npis,
+                o.identifiers         = org.identifiers,
+                o.addresses           = org.addresses,
+                o.emails              = org.emails,
+                o.phones              = org.phones,
+                o.faxes               = org.faxes,
+                o.part_of_reference   = org.part_of_id,
                 o.endpoint_references = org.endpoint_ids
             RETURN count(o) AS count
             """

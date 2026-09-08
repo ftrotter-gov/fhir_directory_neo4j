@@ -1,5 +1,10 @@
 """
 OrganizationAffiliation resource importer.
+
+Supports both NDH and Da Vinci PDex Plan Net OrganizationAffiliation resources.
+
+Plan Net additions:
+  network[]  -> network_ids property + IN_NETWORK relationships to Organizations
 """
 
 from typing import Dict, Any, List
@@ -9,9 +14,16 @@ from .base import BaseImporter, _to_json_string
 
 class OrganizationAffiliationImporter(BaseImporter):
     """Import OrganizationAffiliation resources into Neo4j."""
-    
+
     RESOURCE_TYPE = "OrganizationAffiliation"
     NODE_LABEL = "OrganizationAffiliation"
+
+    def __init__(self, *, neo4j_uri, neo4j_user, neo4j_password,
+                 import_tag=None, use_create=False, source_format="fhir_unknown"):
+        super().__init__(neo4j_uri=neo4j_uri, neo4j_user=neo4j_user,
+                         neo4j_password=neo4j_password, import_tag=import_tag,
+                         use_create=use_create)
+        self.source_format = source_format
     
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
@@ -90,19 +102,30 @@ class OrganizationAffiliationImporter(BaseImporter):
                         ep_id = self._parse_reference(reference=ref)
                         if ep_id:
                             endpoint_ids.append(ep_id)
-            
+
+            # Plan Net: extract network[] references
+            network_ids = []
+            for net_ref in resource.get('network', []):
+                if isinstance(net_ref, dict):
+                    net_id = self._parse_reference(reference=net_ref.get('reference'))
+                    if net_id:
+                        network_ids.append(net_id)
+
             affiliation_data.append({
-                'fhir_id': fhir_id,
-                'resource_type': self.RESOURCE_TYPE,
-                'active': active,
-                'organization_id': org_id,
+                'fhir_id':                      fhir_id,
+                'primary_key':                  fhir_id,
+                'source_format':                self.source_format,
+                'resource_type':                self.RESOURCE_TYPE,
+                'active':                       active,
+                'organization_id':              org_id,
                 'participating_organization_id': participating_org_id,
-                'codes': codes,
-                'specialties': specialties,
-                'location_ids': location_ids,
-                'endpoint_ids': endpoint_ids,
-                'identifiers': _to_json_string(obj=identifiers),
-                'import_tag': self.import_tag,
+                'codes':                        codes,
+                'specialties':                  specialties,
+                'location_ids':                 location_ids,
+                'endpoint_ids':                 endpoint_ids,
+                'network_ids':                  network_ids,
+                'identifiers':                  _to_json_string(obj=identifiers),
+                'import_tag':                   self.import_tag,
             })
         
         # Batch import nodes - use CREATE or MERGE based on mode
@@ -110,34 +133,40 @@ class OrganizationAffiliationImporter(BaseImporter):
             query = """
             UNWIND $batch AS aff
             CREATE (oa:OrganizationAffiliation {
-                fhir_id: aff.fhir_id,
-                import_tag: aff.import_tag,
+                primary_key:   aff.primary_key,
+                fhir_id:       aff.fhir_id,
+                import_tag:    aff.import_tag,
+                source_format: aff.source_format,
                 resource_type: aff.resource_type,
-                active: aff.active,
-                organization_reference: aff.organization_id,
+                active:        aff.active,
+                organization_reference:              aff.organization_id,
                 participating_organization_reference: aff.participating_organization_id,
-                codes: aff.codes,
-                specialties: aff.specialties,
-                location_references: aff.location_ids,
-                endpoint_references: aff.endpoint_ids,
-                identifiers: aff.identifiers
+                codes:         aff.codes,
+                specialties:   aff.specialties,
+                location_references:  aff.location_ids,
+                endpoint_references:  aff.endpoint_ids,
+                network_references:   aff.network_ids,
+                identifiers:   aff.identifiers
             })
             RETURN count(oa) AS count
             """
         else:
             query = """
             UNWIND $batch AS aff
-            MERGE (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MERGE (oa:OrganizationAffiliation {primary_key: aff.primary_key})
             ON CREATE SET oa.import_tag = aff.import_tag
-            SET oa.resource_type = aff.resource_type,
-                oa.active = aff.active,
+            SET oa.fhir_id        = aff.fhir_id,
+                oa.source_format  = aff.source_format,
+                oa.resource_type  = aff.resource_type,
+                oa.active         = aff.active,
                 oa.organization_reference = aff.organization_id,
                 oa.participating_organization_reference = aff.participating_organization_id,
-                oa.codes = aff.codes,
-                oa.specialties = aff.specialties,
+                oa.codes          = aff.codes,
+                oa.specialties    = aff.specialties,
                 oa.location_references = aff.location_ids,
                 oa.endpoint_references = aff.endpoint_ids,
-                oa.identifiers = aff.identifiers
+                oa.network_references  = aff.network_ids,
+                oa.identifiers    = aff.identifiers
             RETURN count(oa) AS count
             """
         
@@ -161,18 +190,17 @@ class OrganizationAffiliationImporter(BaseImporter):
             use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
         if use_create:
-            # FAST MODE: Single combined query to minimize round trips (4x faster!)
             combined_query = """
             UNWIND $batch AS aff
-            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-            
+            MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
+
             // Primary organization relationship
             OPTIONAL MATCH (o:Organization {fhir_id: aff.organization_id})
             WHERE aff.organization_id IS NOT NULL
             FOREACH (_ IN CASE WHEN o IS NOT NULL THEN [1] ELSE [] END |
                 CREATE (o)-[:HAS_AFFILIATION]->(oa)
             )
-            
+
             // Participating organization relationship
             WITH oa, aff
             OPTIONAL MATCH (po:Organization {fhir_id: aff.participating_organization_id})
@@ -180,7 +208,7 @@ class OrganizationAffiliationImporter(BaseImporter):
             FOREACH (_ IN CASE WHEN po IS NOT NULL THEN [1] ELSE [] END |
                 CREATE (oa)-[:AFFILIATED_WITH]->(po)
             )
-            
+
             // Location relationships (multiple)
             WITH oa, aff
             UNWIND COALESCE(aff.location_ids, []) AS loc_id
@@ -188,7 +216,7 @@ class OrganizationAffiliationImporter(BaseImporter):
             FOREACH (_ IN CASE WHEN l IS NOT NULL THEN [1] ELSE [] END |
                 CREATE (oa)-[:AT_LOCATION]->(l)
             )
-            
+
             // Endpoint relationships (multiple)
             WITH DISTINCT oa, aff
             UNWIND COALESCE(aff.endpoint_ids, []) AS ep_id
@@ -198,43 +226,48 @@ class OrganizationAffiliationImporter(BaseImporter):
             )
             """
             session.run(combined_query, batch=affiliation_data)
-            
+
         else:
-            # SAFE MODE: Separate queries using MERGE (slower but clearer)
-            # Create primary organization relationships
             org_query = """
             UNWIND $batch AS aff
-            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
             MATCH (o:Organization {fhir_id: aff.organization_id})
             MERGE (o)-[:HAS_AFFILIATION]->(oa)
             """
             session.run(org_query, batch=[a for a in affiliation_data if a.get('organization_id')])
-            
-            # Create participating organization relationships
+
             part_org_query = """
             UNWIND $batch AS aff
-            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
             MATCH (o:Organization {fhir_id: aff.participating_organization_id})
             MERGE (oa)-[:AFFILIATED_WITH]->(o)
             """
             session.run(part_org_query, batch=[a for a in affiliation_data if a.get('participating_organization_id')])
-            
-            # Create Location relationships
+
             loc_query = """
             UNWIND $batch AS aff
-            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
             UNWIND aff.location_ids AS loc_id
             MATCH (l:Location {fhir_id: loc_id})
             MERGE (oa)-[:AT_LOCATION]->(l)
             """
             session.run(loc_query, batch=[a for a in affiliation_data if a.get('location_ids')])
-            
-            # Create Endpoint relationships
+
             ep_query = """
             UNWIND $batch AS aff
-            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
             UNWIND aff.endpoint_ids AS ep_id
             MATCH (e:Endpoint {fhir_id: ep_id})
             MERGE (oa)-[:HAS_ENDPOINT]->(e)
             """
             session.run(ep_query, batch=[a for a in affiliation_data if a.get('endpoint_ids')])
+
+        # Plan Net: IN_NETWORK relationships (both modes use MERGE)
+        network_query = """
+        UNWIND $batch AS aff
+        MATCH (oa:OrganizationAffiliation {primary_key: aff.primary_key})
+        UNWIND aff.network_ids AS net_id
+        MATCH (n:Organization {fhir_id: net_id})
+        MERGE (oa)-[:IN_NETWORK]->(n)
+        """
+        session.run(network_query, batch=[a for a in affiliation_data if a.get('network_ids')])

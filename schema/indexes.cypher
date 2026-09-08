@@ -133,3 +133,74 @@ FOR (e:Endpoint) ON (e.FHIR_address);
 
 CREATE INDEX direct_address_endpoint IF NOT EXISTS
 FOR (e:Endpoint) ON (e.Direct_address);
+
+// ============================================
+// HealthcareService (Plan Net)
+// ============================================
+
+CREATE CONSTRAINT healthcareservice_primary_key IF NOT EXISTS
+FOR (hs:HealthcareService) REQUIRE hs.primary_key IS UNIQUE;
+
+CREATE INDEX import_tag_healthcareservice IF NOT EXISTS
+FOR (hs:HealthcareService) ON (hs.import_tag);
+
+CREATE INDEX active_healthcareservice IF NOT EXISTS
+FOR (hs:HealthcareService) ON (hs.active);
+
+// ============================================
+// Source Format Indexes (multi-format support)
+// ============================================
+
+// Enables queries like "show me all NDH vs Plan Net vs MR data"
+CREATE INDEX source_format_practitioner IF NOT EXISTS
+FOR (p:Practitioner) ON (p.source_format);
+
+CREATE INDEX source_format_organization IF NOT EXISTS
+FOR (o:Organization) ON (o.source_format);
+
+CREATE INDEX source_format_practitioner_role IF NOT EXISTS
+FOR (pr:PractitionerRole) ON (pr.source_format);
+
+CREATE INDEX source_format_location IF NOT EXISTS
+FOR (l:Location) ON (l.source_format);
+
+CREATE INDEX source_format_endpoint IF NOT EXISTS
+FOR (e:Endpoint) ON (e.source_format);
+
+CREATE INDEX source_format_org_affiliation IF NOT EXISTS
+FOR (oa:OrganizationAffiliation) ON (oa.source_format);
+
+CREATE INDEX source_format_healthcareservice IF NOT EXISTS
+FOR (hs:HealthcareService) ON (hs.source_format);
+
+// ============================================
+// Primary Key Indexes (universal merge key)
+// primary_key = fhir_id for FHIR data,
+//               npi for MR Practitioners/Orgs,
+//               sha256 hash for MR Locations
+// ============================================
+
+CREATE CONSTRAINT practitioner_primary_key IF NOT EXISTS
+FOR (p:Practitioner) REQUIRE p.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT organization_primary_key IF NOT EXISTS
+FOR (o:Organization) REQUIRE o.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT location_primary_key IF NOT EXISTS
+FOR (l:Location) REQUIRE l.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT practitioner_role_primary_key IF NOT EXISTS
+FOR (pr:PractitionerRole) REQUIRE pr.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT org_affiliation_primary_key IF NOT EXISTS
+FOR (oa:OrganizationAffiliation) REQUIRE oa.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT endpoint_primary_key IF NOT EXISTS
+FOR (e:Endpoint) REQUIRE e.primary_key IS UNIQUE;
+
+// ============================================
+// Plan Net Network / Accepting Patients
+// ============================================
+
+CREATE INDEX accepting_patients_practitioner_role IF NOT EXISTS
+FOR (pr:PractitionerRole) ON (pr.accepting_patients);

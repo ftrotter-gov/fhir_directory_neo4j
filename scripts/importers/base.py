@@ -1,5 +1,14 @@
 """
 Base importer class with common functionality for all FHIR resource importers.
+
+Supports three file formats:
+  FHIR NDJSON  - one FHIR resource per line (.ndjson)
+  FHIR Bundle  - single Bundle JSON object with entry[] array (.json)
+  (MR JSON handled by mr_normalizer.py, not by this base class)
+
+The read_file() method auto-detects format and dispatches to the correct reader.
+source_format is derived from registry.get_source_format_string() and stamped
+on every node written to Neo4j.
 """
 
 import json
@@ -8,6 +17,7 @@ import time
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from neo4j import GraphDatabase, Session
+from .registry import FileFormat, detect_format, get_source_format_string
 
 
 def _to_json_string(*, obj: Any) -> Optional[str]:
@@ -330,44 +340,106 @@ class BaseImporter:
     
     def read_ndjson(self, *, filepath: Path) -> List[Dict[str, Any]]:
         """
-        Read and parse an NDJSON file.
-        
+        Read and parse an NDJSON file (one FHIR resource JSON object per line).
+
         Args:
             filepath: Path to the NDJSON file
-        
+
         Returns:
-            List of parsed JSON objects
+            List of parsed FHIR resource dicts matching self.RESOURCE_TYPE
         """
         records = []
         errors = 0
-        
-        self._log(message=f"Reading {filepath}...")
-        
+
+        self._log(message=f"Reading NDJSON {filepath}...")
+
         with open(filepath, 'r', encoding='utf-8') as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                
                 try:
                     record = json.loads(line)
-                    
-                    # Verify it's the expected resource type
                     resource_type = record.get('resourceType')
                     if resource_type != self.RESOURCE_TYPE:
                         self._log(message=f"Warning: Line {line_num} has resourceType '{resource_type}', expected '{self.RESOURCE_TYPE}'")
                         continue
-                    
                     records.append(record)
-                    
                 except json.JSONDecodeError as e:
                     errors += 1
                     self._log(message=f"Error parsing line {line_num}: {e}")
                     continue
-        
+
         self._log(message=f"Read {len(records)} valid {self.RESOURCE_TYPE} resources ({errors} errors)")
-        
         return records
+
+    def read_json_bundle(self, *, filepath: Path) -> List[Dict[str, Any]]:
+        """
+        Read and parse a FHIR Bundle JSON file.
+
+        Extracts resources from entry[].resource, filtering by self.RESOURCE_TYPE.
+
+        Args:
+            filepath: Path to the FHIR Bundle JSON file
+
+        Returns:
+            List of FHIR resource dicts matching self.RESOURCE_TYPE
+        """
+        records = []
+        self._log(message=f"Reading FHIR Bundle {filepath}...")
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                bundle = json.load(f)
+        except json.JSONDecodeError as e:
+            self._log(message=f"Error parsing bundle JSON {filepath}: {e}")
+            return records
+
+        if bundle.get('resourceType') != 'Bundle':
+            self._log(message=f"Warning: {filepath.name} is not a Bundle (resourceType='{bundle.get('resourceType')}'), skipping")
+            return records
+
+        entries = bundle.get('entry', [])
+        skipped = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            resource = entry.get('resource', {})
+            if not isinstance(resource, dict):
+                continue
+            resource_type = resource.get('resourceType')
+            if resource_type != self.RESOURCE_TYPE:
+                skipped += 1
+                continue
+            records.append(resource)
+
+        self._log(message=f"Read {len(records)} valid {self.RESOURCE_TYPE} resources from bundle ({skipped} skipped)")
+        return records
+
+    def read_file(self, *, filepath: Path) -> List[Dict[str, Any]]:
+        """
+        Auto-detect file format and read FHIR resources from filepath.
+
+        Dispatches to read_ndjson() or read_json_bundle() based on the format
+        detected by registry.detect_format().
+
+        Args:
+            filepath: Path to a .ndjson or .json file
+
+        Returns:
+            List of FHIR resource dicts matching self.RESOURCE_TYPE
+        """
+        file_format = detect_format(filepath)
+
+        if file_format == FileFormat.FHIR_BUNDLE:
+            return self.read_json_bundle(filepath=filepath)
+
+        if file_format in (FileFormat.FHIR_NDJSON, FileFormat.UNKNOWN):
+            # Fall back to NDJSON for unknown -- catches single-resource JSON too
+            return self.read_ndjson(filepath=filepath)
+
+        self._log(message=f"Warning: {filepath.name} appears to be a non-FHIR format (MR JSON?), skipping in FHIR importer")
+        return []
     
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
@@ -394,7 +466,7 @@ class BaseImporter:
             batch_size: Number of records to process per batch
             limit: Optional limit on number of records to import (useful for testing)
         """
-        records = self.read_ndjson(filepath=filepath)
+        records = self.read_file(filepath=filepath)
         
         if not records:
             print(f"No {self.RESOURCE_TYPE} records to import from {filepath}")

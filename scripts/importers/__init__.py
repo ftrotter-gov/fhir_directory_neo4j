@@ -2,6 +2,7 @@
 FHIR NDJSON to Neo4j importers.
 
 Each resource type has its own importer that inherits from the base importer.
+Supports FHIR NDJSON, FHIR Bundle JSON, and (via MRNormalizer) MR JSON formats.
 """
 
 from .base import BaseImporter
@@ -11,6 +12,10 @@ from .organization import OrganizationImporter
 from .organization_affiliation import OrganizationAffiliationImporter
 from .endpoint import EndpointImporter
 from .location import LocationImporter
+from .healthcare_service import HealthcareServiceImporter
+from .mr_normalizer import MRNormalizer
+from .registry import FileFormat, detect_format, get_source_format_string, normalize_stem, STEM_MAP
+from .discovery import discover_fhir_files
 
 __all__ = [
     'BaseImporter',
@@ -20,4 +25,12 @@ __all__ = [
     'OrganizationAffiliationImporter',
     'EndpointImporter',
     'LocationImporter',
+    'HealthcareServiceImporter',
+    'MRNormalizer',
+    'FileFormat',
+    'detect_format',
+    'get_source_format_string',
+    'normalize_stem',
+    'STEM_MAP',
+    'discover_fhir_files',
 ]
