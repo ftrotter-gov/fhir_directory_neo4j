@@ -113,6 +113,7 @@ NEO4J_AUTH=neo4j/change_this_password
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=change_this_password
+FHIR_DIRECTORY_PATH=/absolute/path/to/fhir/directory
 ```
 
 ### Variable responsibilities
@@ -123,6 +124,7 @@ NEO4J_PASSWORD=change_this_password
 | `NEO4J_URI` | Python import scripts | Bolt connection URI; defaults to `bolt://localhost:7687` |
 | `NEO4J_USER` | Python import scripts | Neo4j username; defaults to `neo4j` |
 | `NEO4J_PASSWORD` | Python scripts and Docker health check | Required connection password |
+| `FHIR_DIRECTORY_PATH` | All FHIR import programs | Default source directory when no positional path is supplied |
 
 The password portion of `NEO4J_AUTH` must match `NEO4J_PASSWORD`. Replace both
 placeholder values before starting Neo4j. Do not commit `.env` or real secrets.
@@ -169,13 +171,39 @@ source-format indexes.
 
 ## Import Modes
 
+### Import and verify
+
+Use the combined workflow when evaluating a directory source:
+
+```bash
+python import_and_check_fhir_directory.py --import-tag a_unique_source_tag
+```
+
+This workflow derives expected counts using the production readers, runs the
+safe importer twice, prints source and processed counts by resource type, and
+runs the InLaw classes in `sensible_data_checks/`. It returns a nonzero exit
+status when a file import or sanity check fails.
+
+Each `check_*.py` file contains exactly one independently maintainable sanity
+check. Current checks cover source-derived counts, Plan Net source format,
+universal node properties, Practitioner NPI completeness and uniqueness,
+primary-key uniqueness, and relationship inventory.
+
+All import programs resolve their source directory in this order:
+
+1. An explicit positional directory argument.
+2. Exported `FHIR_DIRECTORY_PATH`.
+3. `FHIR_DIRECTORY_PATH` loaded from the repository-root `.env`.
+
+The resolved path must exist and be a directory.
+
 ### Safe import and update
 
 `import_or_update_ndjson.py` uses `MERGE` and is the default choice for repeat
 imports and updates:
 
 ```bash
-python scripts/import_or_update_ndjson.py /path/to/directory \
+python scripts/import_or_update_ndjson.py \
   --batch-size 5000 --import-tag payer_2026
 ```
 
@@ -188,7 +216,7 @@ Properties present in a later import replace the corresponding stored values.
 database:
 
 ```bash
-python scripts/import_ndjson_fast.py /path/to/directory \
+python scripts/import_ndjson_fast.py \
   --batch-size 10000 --import-tag initial_load
 ```
 

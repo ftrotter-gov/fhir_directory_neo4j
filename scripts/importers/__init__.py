@@ -17,6 +17,7 @@ from .mr_normalizer import MRNormalizer
 from .registry import FileFormat, detect_format, get_source_format_string, normalize_stem, STEM_MAP
 from .discovery import discover_fhir_files
 from .fhir_parser import FHIRDiagnostic, FHIRParseResult, FHIRParser, FHIRResourceRecord
+from .runtime_config import load_environment_file, resolve_fhir_directory
 
 __all__ = [
     'BaseImporter',
@@ -38,4 +39,6 @@ __all__ = [
     'FHIRParseResult',
     'FHIRParser',
     'FHIRResourceRecord',
+    'load_environment_file',
+    'resolve_fhir_directory',
 ]

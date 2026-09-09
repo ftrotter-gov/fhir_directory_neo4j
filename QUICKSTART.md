@@ -71,12 +71,36 @@ indexes.
 
 The scripts automatically load the repository-root `.env` file.
 
+Set the default source directory once in `.env`:
+
+```dotenv
+FHIR_DIRECTORY_PATH=/absolute/path/to/fhir/directory
+```
+
+All import programs use this value when the positional directory is omitted.
+An explicit command-line directory overrides the configured default.
+
+### Import with repeatable sanity checks
+
+The recommended validation workflow runs the safe importer twice, prints
+source and processed counts, and executes the checks in
+`sensible_data_checks/`:
+
+```bash
+python import_and_check_fhir_directory.py --import-tag a_unique_source_tag
+```
+
+Expected counts are calculated from the importable source resources. A second
+safe pass reconciles relationships whose referenced nodes became available
+during the first pass. The command exits nonzero if import counts differ or any
+InLaw check fails.
+
 ### Safe, repeatable import
 
 Use the idempotent importer unless the database is known to be empty:
 
 ```bash
-python scripts/import_or_update_ndjson.py /path/to/directory --batch-size 5000
+python scripts/import_or_update_ndjson.py --batch-size 5000
 ```
 
 ### Faster initial import
@@ -84,7 +108,7 @@ python scripts/import_or_update_ndjson.py /path/to/directory --batch-size 5000
 For an empty database only, use `CREATE`-based import:
 
 ```bash
-python scripts/import_ndjson_fast.py /path/to/directory --batch-size 10000
+python scripts/import_ndjson_fast.py --batch-size 10000
 ```
 
 Running the fast importer more than once can create duplicates or conflict

@@ -363,7 +363,11 @@ class Neo4jDockerInstaller:
             capture_output=True,
         )
         Neo4jDockerInstaller.run_command(
-            command=[sys.executable, "-c", "import duckdb; import neo4j"],
+            command=[
+                sys.executable,
+                "-c",
+                "import duckdb; import neo4j; from src.inlaw import InLaw",
+            ],
             repository_root=repository_root,
             capture_output=True,
         )

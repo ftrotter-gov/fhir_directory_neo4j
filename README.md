@@ -66,6 +66,12 @@ See [QUICKSTART.md](QUICKSTART.md) for setup and first-import instructions.
 See [README_neo4j.md](README_neo4j.md) for the data model, file discovery,
 import modes, and operational details.
 
+For a source-derived import summary and repeatable InLaw sanity checks, run:
+
+```bash
+python import_and_check_fhir_directory.py --import-tag a_unique_source_tag
+```
+
 ## License
 
 This repository is released under [CC0 1.0 Universal](LICENSE).

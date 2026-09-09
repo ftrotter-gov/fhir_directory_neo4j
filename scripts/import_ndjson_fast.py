@@ -33,6 +33,7 @@ from importers import (
     HealthcareServiceImporter,
     discover_fhir_files,
     get_source_format_string,
+    resolve_fhir_directory,
 )
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -303,6 +304,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Use FHIR_DIRECTORY_PATH from the repository .env
+  python import_ndjson_fast.py --batch-size 10000
+
   # FAST initial import with large batch size (recommended)
   python import_ndjson_fast.py /data/fhir --batch-size 10000
   
@@ -345,7 +349,8 @@ File Naming:
     parser.add_argument(
         'directory',
         type=Path,
-        help='Directory containing FHIR NDJSON files'
+        nargs='?',
+        help='FHIR directory; defaults to FHIR_DIRECTORY_PATH from .env'
     )
     
     parser.add_argument(
@@ -371,20 +376,15 @@ File Naming:
     
     args = parser.parse_args()
     
-    # Load .env file if it exists
     env_file = Path(__file__).parent.parent / '.env'
-    if env_file.exists():
-        print(f"Loading environment from {env_file}")
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key.strip()] = value.strip()
+    fhir_directory = resolve_fhir_directory(
+        command_line_directory=args.directory,
+        environment_path=env_file,
+    )
     
     # Discover FHIR files (NDJSON, Bundle JSON, and MR JSON)
-    print(f"Scanning directory: {args.directory}\n")
-    files = discover_fhir_files(directory=args.directory)
+    print(f"Scanning directory: {fhir_directory}\n")
+    files = discover_fhir_files(directory=fhir_directory)
 
     if not files:
         print("\nNo supported FHIR files found.")

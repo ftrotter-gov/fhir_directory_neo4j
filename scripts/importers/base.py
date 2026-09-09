@@ -480,7 +480,7 @@ class BaseImporter:
         """
         raise NotImplementedError("Subclasses must implement import_batch")
     
-    def import_file(self, *, filepath: Path, batch_size: int = 1000, limit: Optional[int] = None) -> None:
+    def import_file(self, *, filepath: Path, batch_size: int = 1000, limit: Optional[int] = None) -> int:
         """
         Import an entire NDJSON file into Neo4j.
         
@@ -493,7 +493,7 @@ class BaseImporter:
         
         if not records:
             print(f"No {self.RESOURCE_TYPE} records to import from {filepath}")
-            return
+            return 0
         
         # Apply limit if specified
         if limit is not None and limit > 0:
@@ -535,6 +535,7 @@ class BaseImporter:
         print(f"Total time: {total_time_str}")
         print(f"Average time per record: {avg_time_str}")
         print(f"{'='*60}\n")
+        return len(records)
     
     @staticmethod
     def _format_time(*, seconds: float) -> str:

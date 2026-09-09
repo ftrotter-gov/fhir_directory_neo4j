@@ -37,6 +37,7 @@ from importers import (
     HealthcareServiceImporter,
     discover_fhir_files,
     get_source_format_string,
+    resolve_fhir_directory,
 )
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -227,7 +228,7 @@ def check_neo4j_connection(*, config: Dict[str, str]) -> bool:
         sys.exit(1)
 
 
-def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
+def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, int]:
     """
     Import all discovered FHIR files into Neo4j.
 
@@ -239,8 +240,7 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         limit:      Optional limit on number of records to import per resource type
     """
     if not files:
-        print("No FHIR files found to import.")
-        return
+        raise RuntimeError("import_or_update_ndjson.py Error: No FHIR files found to import.")
 
     if '__mr__' in files:
         print(f"\nNote: {len(files['__mr__'])} MR JSON file(s) found but MR import is not yet implemented.")
@@ -261,6 +261,8 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         'PractitionerRole',
         'OrganizationAffiliation',
     ]
+    imported_counts: Dict[str, int] = {}
+    import_errors = []
 
     for resource_type in import_order:
         if resource_type not in fhir_types:
@@ -285,17 +287,29 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
                     import_tag=import_tag,
                     source_format=source_format,
                 )
-                importer.import_file(filepath=filepath, batch_size=batch_size, limit=limit)
-                importer.close()
+                imported_count = importer.import_file(filepath=filepath, batch_size=batch_size, limit=limit)
+                imported_counts[resource_type] = imported_counts.get(resource_type, 0) + imported_count
                 print(f"  ✓ {filepath.name}")
             except Exception as e:
                 print(f"  ✗ Error importing {filepath.name}: {e}")
+                import_errors.append(f"{resource_type}/{filepath.name}: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                if 'importer' in locals():
+                    importer.close()
+                    del importer
+
+    if import_errors:
+        raise RuntimeError(
+            "import_or_update_ndjson.py Error: One or more files failed: "
+            + "; ".join(import_errors)
+        )
 
     print(f"\n{'='*60}")
     print("Import completed!")
     print(f"{'='*60}\n")
+    return imported_counts
 
 
 def main() -> None:
@@ -305,6 +319,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Use FHIR_DIRECTORY_PATH from the repository .env
+  python import_or_update_ndjson.py
+
   # Import/update all FHIR resources from a directory
   python import_or_update_ndjson.py /data/fhir
   
@@ -344,7 +361,8 @@ File Naming:
     parser.add_argument(
         'directory',
         type=Path,
-        help='Directory containing FHIR NDJSON files'
+        nargs='?',
+        help='FHIR directory; defaults to FHIR_DIRECTORY_PATH from .env'
     )
     
     parser.add_argument(
@@ -370,20 +388,15 @@ File Naming:
     
     args = parser.parse_args()
     
-    # Load .env file if it exists
     env_file = Path(__file__).parent.parent / '.env'
-    if env_file.exists():
-        print(f"Loading environment from {env_file}")
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key.strip()] = value.strip()
+    fhir_directory = resolve_fhir_directory(
+        command_line_directory=args.directory,
+        environment_path=env_file,
+    )
     
     # Discover FHIR files (NDJSON, Bundle JSON, and MR JSON)
-    print(f"Scanning directory: {args.directory}\n")
-    files = discover_fhir_files(directory=args.directory)
+    print(f"Scanning directory: {fhir_directory}\n")
+    files = discover_fhir_files(directory=fhir_directory)
 
     if not files:
         print("\nNo supported FHIR files found.")
