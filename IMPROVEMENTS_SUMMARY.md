@@ -5,7 +5,7 @@
 
 ## Overview
 
-The Neo4j FHIR import system has been comprehensively updated to improve data modeling based on the specifications in `AI_Instructions/ImproveNeo4JModel.md`.
+The Neo4j FHIR import system has been comprehensively updated to improve data modeling based on the specifications in [AI_Instructions/ImproveNeo4JModel.md](AI_Instructions/ImproveNeo4JModel.md).
 
 ## Changes Implemented
 
@@ -208,10 +208,15 @@ RETURN e.Direct_address, e.rank
 
 ## Testing
 
-The implementation has been validated against the example files in `data/examples/`:
+At the time of this work, the implementation was validated against example
+files in a `data/examples/` directory:
 - `1669540423_praciticioner.json` - Practitioner with specialties, licenses, addresses, telecoms, endpoint references
 - `1730324872_org.json` - Organization with multiple NPIs, addresses, telecoms
 - `ff89cb4e-4e59-48a2-89ab-d6c92908b769.end.json` - Endpoint with rank
+
+> **Note:** those example files lived in the original upstream repository and
+> are not part of this standalone repository. For current, runnable tests see
+> `tests/`.
 
 ## Files Modified
 
