@@ -209,3 +209,32 @@ FOR (e:Endpoint) REQUIRE e.primary_key IS UNIQUE;
 
 CREATE INDEX accepting_patients_practitioner_role IF NOT EXISTS
 FOR (pr:PractitionerRole) ON (pr.accepting_patients);
+
+// ============================================
+// InsurancePlan (NDH + Plan Net)
+// NOTE: no RANGE index on array properties (alias, plan_types,
+// network_references) -- Neo4j RANGE indexes have a per-value size cap and
+// abort imports on large arrays. Only scalar / text properties are indexed.
+// ============================================
+
+CREATE CONSTRAINT insurance_plan_primary_key IF NOT EXISTS
+FOR (ip:InsurancePlan) REQUIRE ip.primary_key IS UNIQUE;
+
+CREATE CONSTRAINT insurance_plan_fhir_id IF NOT EXISTS
+FOR (ip:InsurancePlan) REQUIRE ip.fhir_id IS UNIQUE;
+
+CREATE INDEX import_tag_insurance_plan IF NOT EXISTS
+FOR (ip:InsurancePlan) ON (ip.import_tag);
+
+CREATE INDEX source_format_insurance_plan IF NOT EXISTS
+FOR (ip:InsurancePlan) ON (ip.source_format);
+
+CREATE INDEX status_insurance_plan IF NOT EXISTS
+FOR (ip:InsurancePlan) ON (ip.status);
+
+CREATE TEXT INDEX name_insurance_plan IF NOT EXISTS
+FOR (ip:InsurancePlan) ON (ip.name);
+
+// Speeds up OWNED_BY relationship creation (scalar reference)
+CREATE INDEX reference_owned_by_insurance_plan IF NOT EXISTS
+FOR (ip:InsurancePlan) ON (ip.owned_by_reference);

@@ -31,6 +31,7 @@ from importers import (
     EndpointImporter,
     LocationImporter,
     HealthcareServiceImporter,
+    InsurancePlanImporter,
     discover_fhir_files,
     get_source_format_string,
     resolve_fhir_directory,
@@ -50,6 +51,7 @@ IMPORTER_MAP: Dict[str, Type[BaseImporter]] = {
     'Endpoint':                EndpointImporter,
     'Location':                LocationImporter,
     'HealthcareService':       HealthcareServiceImporter,
+    'InsurancePlan':           InsurancePlanImporter,
 }
 
 
@@ -264,6 +266,7 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         'HealthcareService',       # References Organization, Location
         'PractitionerRole',        # References Practitioner, Organization, Location, Endpoint
         'OrganizationAffiliation', # References Organization, Location, Endpoint
+        'InsurancePlan',           # References Organization (ownedBy, network[])
     ]
 
     for resource_type in import_order:

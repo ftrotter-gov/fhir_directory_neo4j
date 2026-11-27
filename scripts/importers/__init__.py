@@ -13,6 +13,7 @@ from .organization_affiliation import OrganizationAffiliationImporter
 from .endpoint import EndpointImporter
 from .location import LocationImporter
 from .healthcare_service import HealthcareServiceImporter
+from .insurance_plan import InsurancePlanImporter
 from .mr_normalizer import MRNormalizer
 from .registry import (
     FileFormat,
@@ -36,6 +37,7 @@ __all__ = [
     'EndpointImporter',
     'LocationImporter',
     'HealthcareServiceImporter',
+    'InsurancePlanImporter',
     'MRNormalizer',
     'FileFormat',
     'detect_format',

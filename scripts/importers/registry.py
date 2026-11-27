@@ -56,6 +56,8 @@ STEM_MAP: dict[str, str] = {
     "endpoints":                 "Endpoint",
     "healthcareservice":         "HealthcareService",
     "healthcareservices":        "HealthcareService",
+    "insuranceplan":             "InsurancePlan",
+    "insuranceplans":            "InsurancePlan",
 }
 
 # Profile URL substrings -> source_format strings (checked in order)

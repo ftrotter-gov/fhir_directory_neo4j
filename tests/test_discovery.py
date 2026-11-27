@@ -155,20 +155,38 @@ class DiscoveryTest(unittest.TestCase):
                 discovered,
             )
 
-    def test_skips_unsupported_insurance_plan_with_specific_warning(self) -> None:
+    def test_discovers_insurance_plan_now_that_importer_is_registered(self) -> None:
+        """InsurancePlan is now a supported resource type (NPDV-528).
+
+        Once the InsurancePlan importer is registered and the stem is mapped,
+        discovery must pick these files up rather than skipping them with a
+        "no importer is registered" warning.
+        """
         with tempfile.TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
-            self._write_bundle(
-                path=directory / "InsurancePlan", resource_type="InsurancePlan"
-            )
+            bundle_path = directory / "InsurancePlan"
+            self._write_bundle(path=bundle_path, resource_type="InsurancePlan")
 
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 discovered = discover_fhir_files(directory=directory)
 
-            self.assertEqual({}, discovered)
-            self.assertIn("FHIR resource type InsurancePlan", output.getvalue())
-            self.assertIn("no importer is registered", output.getvalue())
+            self.assertEqual([bundle_path], discovered["InsurancePlan"])
+            self.assertNotIn("no importer is registered", output.getvalue())
+
+    def test_discovers_insurance_plan_ndjson_by_name(self) -> None:
+        """An InsurancePlan.ndjson file is matched by name in pass 1 (NPDV-528)."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            plan_path = directory / "InsurancePlan.ndjson"
+            plan_path.write_text(
+                json.dumps(self._fhir_resource(resource_type="InsurancePlan")) + "\n",
+                encoding="utf-8",
+            )
+
+            discovered = discover_fhir_files(directory=directory)
+
+            self.assertEqual({"InsurancePlan": [plan_path]}, discovered)
 
     def test_preserves_json_and_ndjson_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
