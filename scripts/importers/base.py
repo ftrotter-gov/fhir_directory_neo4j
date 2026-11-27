@@ -14,7 +14,7 @@ on every node written to Neo4j.
 import json
 import sys
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Iterator, List, Optional
 from pathlib import Path
 from neo4j import GraphDatabase, Session
 from .fhir_parser import FHIRParser
@@ -463,7 +463,76 @@ class BaseImporter:
 
         self._log(message=f"Warning: {filepath.name} appears to be a non-FHIR format (MR JSON?), skipping in FHIR importer")
         return []
-    
+
+    def iter_ndjson(self, *, filepath: Path) -> Iterator[Dict[str, Any]]:
+        """
+        Stream matching FHIR resources from an NDJSON file one record at a time.
+
+        Unlike read_ndjson(), this never accumulates the whole file in memory, so
+        it scales to the multi-gigabyte resource files in the full CMS bulk
+        download (e.g. Practitioner ~17 GB, PractitionerRole ~11 GB).
+        """
+        errors = 0
+        emitted = 0
+
+        self._log(message=f"Streaming NDJSON {filepath}...")
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as e:
+                    errors += 1
+                    self._log(message=f"Error parsing line {line_num}: {e}")
+                    continue
+                parse_result = FHIRParser.extract_resources(payload=payload)
+                for diagnostic in parse_result.diagnostics:
+                    self._log(
+                        message=(
+                            f"FHIR {diagnostic.severity} [{diagnostic.code}] on line "
+                            f"{line_num} at {diagnostic.source_path}: "
+                            f"{diagnostic.message}"
+                        )
+                    )
+                matching_records = [
+                    resource_record.resource
+                    for resource_record in parse_result.resources
+                    if resource_record.resource_type == self.RESOURCE_TYPE
+                    and not resource_record.is_contained
+                ]
+                if not matching_records:
+                    resource_type = payload.get('resourceType') if isinstance(payload, dict) else None
+                    self._log(message=f"Warning: Line {line_num} has no importable {self.RESOURCE_TYPE} resource (outer resourceType='{resource_type}')")
+                    continue
+                for record in matching_records:
+                    emitted += 1
+                    yield record
+
+        self._log(message=f"Streamed {emitted} valid {self.RESOURCE_TYPE} resources ({errors} errors)")
+
+    def iter_file(self, *, filepath: Path) -> Iterator[Dict[str, Any]]:
+        """
+        Stream FHIR resources from a file, auto-detecting NDJSON vs Bundle JSON.
+
+        NDJSON is streamed line-by-line. Bundle JSON is a single document and is
+        still read whole (bundles are small relative to the NDJSON resource
+        files), then yielded record by record so callers share one code path.
+        """
+        file_format = detect_format(filepath)
+
+        if file_format == FileFormat.FHIR_BUNDLE:
+            yield from self.read_json_bundle(filepath=filepath)
+            return
+
+        if file_format in (FileFormat.FHIR_NDJSON, FileFormat.UNKNOWN):
+            yield from self.iter_ndjson(filepath=filepath)
+            return
+
+        self._log(message=f"Warning: {filepath.name} appears to be a non-FHIR format (MR JSON?), skipping in FHIR importer")
+
     def import_batch(self, *, session: Session, batch: List[Dict[str, Any]]) -> int:
         """
         Import a batch of resources into Neo4j.
@@ -482,60 +551,71 @@ class BaseImporter:
     
     def import_file(self, *, filepath: Path, batch_size: int = 1000, limit: Optional[int] = None) -> int:
         """
-        Import an entire NDJSON file into Neo4j.
-        
+        Stream a FHIR file into Neo4j in bounded batches.
+
+        Records are read and inserted batch_size at a time via iter_file(), so
+        memory stays flat regardless of file size. This is what lets the full CMS
+        bulk download (including the multi-gigabyte Practitioner and
+        PractitionerRole files) import on a laptop without exhausting RAM.
+
         Args:
-            filepath: Path to the NDJSON file
+            filepath: Path to the NDJSON or Bundle JSON file
             batch_size: Number of records to process per batch
-            limit: Optional limit on number of records to import (useful for testing)
+            limit: Optional cap on records to import (useful for testing)
         """
-        records = self.read_file(filepath=filepath)
-        
-        if not records:
+        remaining = limit if (limit is not None and limit > 0) else None
+        if remaining is not None:
+            print(f"Importing up to {remaining} {self.RESOURCE_TYPE} resources (--limit {limit})...")
+        else:
+            print(f"Importing {self.RESOURCE_TYPE} resources (streaming)...")
+
+        start_time = time.time()
+        total_imported = 0
+        batch: List[Dict[str, Any]] = []
+
+        def flush(session: Session, current_batch: List[Dict[str, Any]]) -> None:
+            nonlocal total_imported
+            if not current_batch:
+                return
+            count = self.import_batch(session=session, batch=current_batch)
+            total_imported += len(current_batch)
+            elapsed_time = time.time() - start_time
+            time_per_record = elapsed_time / total_imported if total_imported > 0 else 0
+            elapsed_str = self._format_time(seconds=elapsed_time)
+            time_per_record_str = (
+                f"{time_per_record:.4f}s" if time_per_record >= 0.0001
+                else f"{time_per_record*1000:.2f}ms"
+            )
+            print(f"  Processed {total_imported} ({count} nodes created/updated) | "
+                  f"Time so far: {elapsed_str} | Time per record: {time_per_record_str}")
+
+        with self.driver.session() as session:
+            for record in self.iter_file(filepath=filepath):
+                if remaining is not None and (total_imported + len(batch)) >= remaining:
+                    break
+                batch.append(record)
+                if len(batch) >= batch_size:
+                    flush(session, batch)
+                    batch = []
+            flush(session, batch)
+
+        if total_imported == 0:
             print(f"No {self.RESOURCE_TYPE} records to import from {filepath}")
             return 0
-        
-        # Apply limit if specified
-        if limit is not None and limit > 0:
-            original_count = len(records)
-            records = records[:limit]
-            print(f"Limiting import to {len(records)} of {original_count} {self.RESOURCE_TYPE} resources (--limit {limit})...")
-        else:
-            print(f"Importing {len(records)} {self.RESOURCE_TYPE} resources...")
-        
-        # Track timing for this resource type
-        start_time = time.time()
-        
-        with self.driver.session() as session:
-            for i in range(0, len(records), batch_size):
-                batch = records[i:i + batch_size]
-                count = self.import_batch(session=session, batch=batch)
-                
-                # Calculate timing information
-                records_processed = i + len(batch)
-                elapsed_time = time.time() - start_time
-                time_per_record = elapsed_time / records_processed if records_processed > 0 else 0
-                
-                # Format time displays
-                elapsed_str = self._format_time(seconds=elapsed_time)
-                time_per_record_str = f"{time_per_record:.4f}s" if time_per_record >= 0.0001 else f"{time_per_record*1000:.2f}ms"
-                
-                print(f"  Processed {records_processed}/{len(records)} ({count} nodes created/updated) | "
-                      f"Time so far: {elapsed_str} | Time per record: {time_per_record_str}")
-        
+
         # Print summary when resource type import is complete
         total_time = time.time() - start_time
         total_time_str = self._format_time(seconds=total_time)
-        avg_time_per_record = total_time / len(records) if len(records) > 0 else 0
+        avg_time_per_record = total_time / total_imported if total_imported > 0 else 0
         avg_time_str = f"{avg_time_per_record:.4f}s" if avg_time_per_record >= 0.0001 else f"{avg_time_per_record*1000:.2f}ms"
-        
+
         print(f"\n{'='*60}")
         print(f"Completed import of {self.RESOURCE_TYPE}")
-        print(f"Total records: {len(records)}")
+        print(f"Total records: {total_imported}")
         print(f"Total time: {total_time_str}")
         print(f"Average time per record: {avg_time_str}")
         print(f"{'='*60}\n")
-        return len(records)
+        return total_imported
     
     @staticmethod
     def _format_time(*, seconds: float) -> str:
