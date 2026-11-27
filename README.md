@@ -65,6 +65,10 @@ database.
 See [QUICKSTART.md](QUICKSTART.md) for setup and first-import instructions.
 See [README_neo4j.md](README_neo4j.md) for the data model, file discovery,
 import modes, and operational details.
+See [DEPLOY.md](DEPLOY.md) to run it on a laptop or deploy it to AWS or Google
+Cloud with your own credentials. `make help` lists the convenience commands
+(`make install`, `make import`, `make check`, `make test`, `make smoke`,
+`make deploy-aws`, `make deploy-gcp`).
 
 For a source-derived import summary and repeatable InLaw sanity checks, run:
 
