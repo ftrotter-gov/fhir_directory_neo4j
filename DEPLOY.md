@@ -187,6 +187,12 @@ the instance can reach and pass `--data-url`. Otherwise SSH in afterward and run
 A full ~6.4M-node NDH import completes in well under an hour on this class of
 instance. Use `make import-fast` for the initial load into an empty database.
 
+Neo4j caps a single transaction's memory at ~70% of heap, so running the
+post-import InLaw sanity checks (`make check`) across the full dataset needs a
+larger `NEO4J_HEAP_MAX` than the laptop default — the cloud bootstrap's
+RAM-based sizing handles this; on a laptop, raise `NEO4J_HEAP_MAX` before
+`make check` at full scale.
+
 ## Security
 
 - Neo4j always requires authentication; the password is randomly generated per
