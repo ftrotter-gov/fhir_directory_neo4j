@@ -123,6 +123,38 @@ class DiscoveryTest(unittest.TestCase):
             self.assertEqual({}, discovered)
             self.assertIn("upstream request error", output.getvalue())
 
+    def test_discovers_cms_bulk_download_numeric_prefix_ndjson(self) -> None:
+        """The official CMS NPD bulk download names files 'NN-ResourceType.ndjson'.
+
+        The numeric ordering prefix must be stripped, and 08-OrganizationAffiliation
+        must never be matched as Organization.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            organization_path = directory / "01-Organization.ndjson"
+            affiliation_path = directory / "08-OrganizationAffiliation.ndjson"
+            organization_path.write_text(
+                json.dumps(self._fhir_resource(resource_type="Organization")) + "\n",
+                encoding="utf-8",
+            )
+            affiliation_path.write_text(
+                json.dumps(
+                    self._fhir_resource(resource_type="OrganizationAffiliation")
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            discovered = discover_fhir_files(directory=directory)
+
+            self.assertEqual(
+                {
+                    "Organization": [organization_path],
+                    "OrganizationAffiliation": [affiliation_path],
+                },
+                discovered,
+            )
+
     def test_skips_unsupported_insurance_plan_with_specific_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

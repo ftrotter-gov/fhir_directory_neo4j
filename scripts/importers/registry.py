@@ -30,7 +30,7 @@ import json
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 
 class FileFormat(Enum):
@@ -102,6 +102,30 @@ def detect_format(filepath: Path) -> FileFormat:
     return FileFormat.UNKNOWN
 
 
+# Friendly --source-format CLI choices mapped to the canonical node stamp. Lets
+# operators correctly tag inputs that carry no meta.profile -- notably the
+# official CMS National Provider Directory bulk download, whose NDH resources
+# omit meta.profile entirely and would otherwise all import as "fhir_unknown".
+SOURCE_FORMAT_OVERRIDES: Dict[str, str] = {
+    "ndh": "fhir_ndh",
+    "plannet": "fhir_plannet",
+    "unknown": "fhir_unknown",
+}
+
+
+def resolve_source_format_override(choice: Optional[str]) -> Optional[str]:
+    """Map a --source-format CLI choice to its canonical source_format stamp."""
+    if choice is None:
+        return None
+    try:
+        return SOURCE_FORMAT_OVERRIDES[choice]
+    except KeyError as error:
+        raise ValueError(
+            f"Unknown source-format override {choice!r}; "
+            f"choose from {sorted(SOURCE_FORMAT_OVERRIDES)}"
+        ) from error
+
+
 def get_source_format_string(filepath: Path, file_format: Optional[FileFormat] = None) -> str:
     """
     Return the source_format string to stamp on every node from this file.
@@ -143,8 +167,21 @@ def normalize_stem(stem: str) -> str:
       "bob_PractitionerRoles-3" -> "practitionerroles"
       "Practitioners-1"         -> "practitioners"
       "HealthcareServices"      -> "healthcareservices"
+      "01-Organization"         -> "organization"
+      "08-OrganizationAffiliation" -> "organizationaffiliation"
     """
     s = stem.lower()
+    # Strip a leading numeric ordering prefix such as "01-" used by the official
+    # CMS National Provider Directory bulk download (e.g. "01-Organization",
+    # "08-OrganizationAffiliation"). Only strip when the remainder resolves to a
+    # known resource type, so "08-OrganizationAffiliation" is never mistaken for
+    # "Organization".
+    leading_number = re.match(r"^\d+-(.+)$", s)
+    if leading_number:
+        remainder = leading_number.group(1)
+        candidate = re.sub(r"-\d+$", "", remainder).replace("_", "")
+        if candidate in STEM_MAP:
+            s = remainder
     if "_" in s:
         _, remainder = s.split("_", 1)
         candidate = re.sub(r"-\d+$", "", remainder).replace("_", "")

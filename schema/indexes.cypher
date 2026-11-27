@@ -37,9 +37,13 @@ FOR (l:Location) REQUIRE l.fhir_id IS UNIQUE;
 CREATE INDEX npi_practitioner IF NOT EXISTS
 FOR (p:Practitioner) ON (p.npi);
 
-// Organizations now have npis array
-CREATE INDEX npis_organization IF NOT EXISTS
-FOR (o:Organization) ON (o.npis);
+// NOTE: Organization.npis is an ARRAY property. A RANGE index on a list value
+// indexes the whole serialized list as one key, which hits Neo4j's ~8 KB
+// index-value limit and aborts the Organization import whenever a single
+// organization carries a large npis array (seen in the official CMS bulk
+// download). Array properties are intentionally NOT range-indexed here; use a
+// FULLTEXT index (see the array-search section at the end of this file) for
+// membership search instead.
 
 // ============================================
 // Indexes for Common Query Patterns
@@ -103,31 +107,32 @@ CREATE INDEX import_tag_organization_affiliation IF NOT EXISTS
 FOR (oa:OrganizationAffiliation) ON (oa.import_tag);
 
 // ============================================
-// Indexes for New Fields
+// Array-property search (FULLTEXT, not RANGE)
 // ============================================
+// specialties, languages_spoken, emails, phones, and npis are ARRAY properties.
+// A RANGE index on a list value indexes the whole serialized list as a single
+// key and hits Neo4j's ~8 KB index-value limit, aborting the import for any
+// node whose array is large (observed on Organization.phones and
+// Organization.npis in the official CMS bulk download). FULLTEXT indexes
+// tokenize each String element, carry no per-value size cap, and support
+// membership search via CALL db.index.fulltext.queryNodes('<index>', '<term>').
 
-// Specialty searches
-CREATE INDEX specialties_practitioner IF NOT EXISTS
-FOR (p:Practitioner) ON (p.specialties);
+CREATE FULLTEXT INDEX practitioner_specialties_fulltext IF NOT EXISTS
+FOR (p:Practitioner) ON EACH [p.specialties];
 
-// Language searches
-CREATE INDEX languages_practitioner IF NOT EXISTS
-FOR (p:Practitioner) ON (p.languages_spoken);
+CREATE FULLTEXT INDEX practitioner_languages_fulltext IF NOT EXISTS
+FOR (p:Practitioner) ON EACH [p.languages_spoken];
 
-// Email/phone searches
-CREATE INDEX emails_practitioner IF NOT EXISTS
-FOR (p:Practitioner) ON (p.emails);
+CREATE FULLTEXT INDEX practitioner_contact_fulltext IF NOT EXISTS
+FOR (p:Practitioner) ON EACH [p.emails, p.phones];
 
-CREATE INDEX emails_organization IF NOT EXISTS
-FOR (o:Organization) ON (o.emails);
+CREATE FULLTEXT INDEX organization_contact_fulltext IF NOT EXISTS
+FOR (o:Organization) ON EACH [o.emails, o.phones];
 
-CREATE INDEX phones_practitioner IF NOT EXISTS
-FOR (p:Practitioner) ON (p.phones);
+CREATE FULLTEXT INDEX organization_npis_fulltext IF NOT EXISTS
+FOR (o:Organization) ON EACH [o.npis];
 
-CREATE INDEX phones_organization IF NOT EXISTS
-FOR (o:Organization) ON (o.phones);
-
-// Endpoint address searches
+// Endpoint address searches (scalar strings; RANGE is appropriate)
 CREATE INDEX fhir_address_endpoint IF NOT EXISTS
 FOR (e:Endpoint) ON (e.FHIR_address);
 
