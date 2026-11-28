@@ -1,31 +1,33 @@
-version: '3.8'
-
 services:
   neo4j:
     image: neo4j:5-community
-    container_name: fhir_neo4j_analysis
+    # Container name, published ports, and memory are overridable via .env so
+    # more than one instance can run on a host (e.g. a smoke instance beside a
+    # full-data instance) and so cloud instances can size memory up. Defaults
+    # reproduce the original single-instance laptop configuration.
+    container_name: ${NEO4J_CONTAINER_NAME:-fhir_neo4j_analysis}
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "${NEO4J_HTTP_PORT:-7474}:7474"  # HTTP / Neo4j Browser
+      - "${NEO4J_BOLT_PORT:-7687}:7687"  # Bolt
     volumes:
-      - ./data:/data
-      - ./logs:/logs
-      - ./import:/var/lib/neo4j/import
+      - ${NEO4J_DATA_DIR:-./data}:/data
+      - ${NEO4J_LOGS_DIR:-./logs}:/logs
+      - ${NEO4J_IMPORT_DIR:-./import}:/var/lib/neo4j/import
     environment:
       # Authentication
       - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/your_password_here}
-      
-      # Memory settings
-      - NEO4J_server_memory_heap_initial__size=512m
-      - NEO4J_server_memory_heap_max__size=1G
-      - NEO4J_server_memory_pagecache_size=512m
-      
+
+      # Memory settings (raise NEO4J_HEAP_MAX / NEO4J_PAGECACHE for large imports)
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-512m}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-1G}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-512m}
+
       # APOC plugin (optional but useful for advanced operations)
       - NEO4J_PLUGINS=["apoc"]
-      
+
       # Allow CSV import from file URLs
       - NEO4J_dbms_security_allow__csv__import__from__file__urls=true
-      
+
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-your_password_here} 'RETURN 1'"]

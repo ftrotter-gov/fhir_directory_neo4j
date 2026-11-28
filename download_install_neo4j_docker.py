@@ -155,6 +155,14 @@ class Neo4jDockerInstaller:
             "NEO4J_URI=bolt://localhost:7687\n"
             "NEO4J_USER=neo4j\n"
             f"NEO4J_PASSWORD={password}\n"
+            "\n"
+            "# Optional overrides to run more than one instance on a host, or to\n"
+            "# size memory up for large imports. Uncomment and adjust as needed.\n"
+            "# NEO4J_CONTAINER_NAME=fhir_neo4j_analysis\n"
+            "# NEO4J_HTTP_PORT=7474\n"
+            "# NEO4J_BOLT_PORT=7687\n"
+            "# NEO4J_HEAP_MAX=1G\n"
+            "# NEO4J_PAGECACHE=512m\n"
         )
         environment_path.write_text(environment_text, encoding="utf-8")
         try:
@@ -273,15 +281,26 @@ class Neo4jDockerInstaller:
         )
 
     @staticmethod
-    def get_container_health(*, repository_root: Path) -> str:
+    def resolve_container_name(*, environment: Dict[str, str]) -> str:
+        """Return the configured container name, defaulting to the shipped name."""
+        return (
+            environment.get("NEO4J_CONTAINER_NAME")
+            or Neo4jDockerInstaller.CONTAINER_NAME
+        )
+
+    @staticmethod
+    def get_container_health(
+        *, repository_root: Path, container_name: Optional[str] = None
+    ) -> str:
         """Return Docker's health value, or a precise non-health state."""
+        container_name = container_name or Neo4jDockerInstaller.CONTAINER_NAME
         result = Neo4jDockerInstaller.run_command(
             command=[
                 "docker",
                 "inspect",
                 "--format",
                 "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
-                Neo4jDockerInstaller.CONTAINER_NAME,
+                container_name,
             ],
             repository_root=repository_root,
             capture_output=True,
@@ -289,14 +308,20 @@ class Neo4jDockerInstaller:
         return result.stdout.strip()
 
     @staticmethod
-    def wait_for_neo4j(*, repository_root: Path, timeout_seconds: int) -> None:
+    def wait_for_neo4j(
+        *,
+        repository_root: Path,
+        timeout_seconds: int,
+        container_name: Optional[str] = None,
+    ) -> None:
         """Wait for the container health check with a bounded timeout."""
+        container_name = container_name or Neo4jDockerInstaller.CONTAINER_NAME
         print(f"Waiting up to {timeout_seconds} seconds for Neo4j to become healthy...")
         deadline = time.monotonic() + timeout_seconds
         last_health = "container health has not been reported"
         while time.monotonic() < deadline:
             last_health = Neo4jDockerInstaller.get_container_health(
-                repository_root=repository_root
+                repository_root=repository_root, container_name=container_name
             )
             if last_health == "healthy":
                 print("Neo4j is healthy.")
@@ -325,12 +350,15 @@ class Neo4jDockerInstaller:
                 "download_install_neo4j_docker.py Error: schema/indexes.cypher is missing."
             )
         print("Applying Neo4j constraints and indexes...")
+        container_name = Neo4jDockerInstaller.resolve_container_name(
+            environment=environment
+        )
         Neo4jDockerInstaller.run_command(
             command=[
                 "docker",
                 "exec",
                 "-i",
-                Neo4jDockerInstaller.CONTAINER_NAME,
+                container_name,
                 "cypher-shell",
                 "-u",
                 environment["NEO4J_USER"],
@@ -347,11 +375,14 @@ class Neo4jDockerInstaller:
         *, repository_root: Path, environment: Dict[str, str]
     ) -> None:
         """Verify Cypher access and imports from the active venv."""
+        container_name = Neo4jDockerInstaller.resolve_container_name(
+            environment=environment
+        )
         Neo4jDockerInstaller.run_command(
             command=[
                 "docker",
                 "exec",
-                Neo4jDockerInstaller.CONTAINER_NAME,
+                container_name,
                 "cypher-shell",
                 "-u",
                 environment["NEO4J_USER"],
@@ -424,6 +455,9 @@ class Neo4jDockerInstaller:
         Neo4jDockerInstaller.wait_for_neo4j(
             repository_root=repository_root,
             timeout_seconds=parsed_arguments.timeout,
+            container_name=Neo4jDockerInstaller.resolve_container_name(
+                environment=environment
+            ),
         )
         Neo4jDockerInstaller.apply_schema(
             repository_root=repository_root, environment=environment
@@ -433,8 +467,9 @@ class Neo4jDockerInstaller:
         )
 
         activation_path = ".venv\\Scripts\\activate" if os.name == "nt" else ".venv/bin/activate"
+        http_port = environment.get("NEO4J_HTTP_PORT", "7474")
         print("\nInstallation complete.")
-        print("Neo4j Browser: http://localhost:7474")
+        print(f"Neo4j Browser: http://localhost:{http_port}")
         print(f"Bolt URI: {environment['NEO4J_URI']}")
         print(f"Activate the project environment: source {activation_path}")
         print("Safe import: python scripts/import_or_update_ndjson.py /path/to/data")

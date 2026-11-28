@@ -31,9 +31,12 @@ from importers import (
     EndpointImporter,
     LocationImporter,
     HealthcareServiceImporter,
+    InsurancePlanImporter,
     discover_fhir_files,
     get_source_format_string,
     resolve_fhir_directory,
+    resolve_source_format_override,
+    SOURCE_FORMAT_OVERRIDES,
 )
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -48,6 +51,7 @@ IMPORTER_MAP: Dict[str, Type[BaseImporter]] = {
     'Endpoint':                EndpointImporter,
     'Location':                LocationImporter,
     'HealthcareService':       HealthcareServiceImporter,
+    'InsurancePlan':           InsurancePlanImporter,
 }
 
 
@@ -224,7 +228,7 @@ def check_neo4j_connection(*, config: Dict[str, str]) -> bool:
         sys.exit(1)
 
 
-def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
+def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None, source_format_override: Optional[str] = None) -> None:
     """
     Import all discovered FHIR files into Neo4j.
 
@@ -234,6 +238,10 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         batch_size: Number of records to process per batch
         import_tag: Optional tag to identify this import run (only set on new nodes)
         limit:      Optional limit on number of records to import per resource type
+        source_format_override: Canonical source_format (e.g. "fhir_ndh") to stamp
+                    on every node, overriding meta.profile detection. Needed for
+                    inputs that omit meta.profile, such as the official CMS bulk
+                    download.
     """
     if not files:
         print("No FHIR files found to import.")
@@ -258,6 +266,7 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         'HealthcareService',       # References Organization, Location
         'PractitionerRole',        # References Practitioner, Organization, Location, Endpoint
         'OrganizationAffiliation', # References Organization, Location, Endpoint
+        'InsurancePlan',           # References Organization (ownedBy, network[])
     ]
 
     for resource_type in import_order:
@@ -273,8 +282,9 @@ def import_resource_files(*, files: Dict[str, List[Path]], batch_size: int, impo
         print(f"{'='*60}")
 
         for filepath in filepaths:
-            source_format = get_source_format_string(filepath)
-            print(f"  File: {filepath.name}  [source_format={source_format}]")
+            source_format = source_format_override or get_source_format_string(filepath)
+            override_note = " (override)" if source_format_override else ""
+            print(f"  File: {filepath.name}  [source_format={source_format}{override_note}]")
             try:
                 importer = importer_class(
                     neo4j_uri=config['uri'],
@@ -373,7 +383,19 @@ File Naming:
         default=None,
         help='Limit the number of records to import per resource type (useful for testing)'
     )
-    
+
+    parser.add_argument(
+        '--source-format',
+        choices=sorted(SOURCE_FORMAT_OVERRIDES),
+        default=None,
+        help=(
+            'Force the source_format stamp on every node, overriding meta.profile '
+            'detection. Use "ndh" for the official CMS National Provider Directory '
+            'bulk download, whose resources carry no meta.profile and would '
+            'otherwise import as fhir_unknown.'
+        ),
+    )
+
     args = parser.parse_args()
     
     env_file = Path(__file__).parent.parent / '.env'
@@ -396,7 +418,8 @@ File Naming:
         files=files,
         batch_size=args.batch_size,
         import_tag=args.import_tag,
-        limit=args.limit
+        limit=args.limit,
+        source_format_override=resolve_source_format_override(args.source_format),
     )
 
 

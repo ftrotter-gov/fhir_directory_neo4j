@@ -11,3 +11,12 @@ __pycache__/
 data/
 logs/
 import/
+# Local bulk-download data (not committed)
+data_downloads/
+
+# Smoke-test and deploy runtime artifacts
+.env.smoke
+.env.smoketest
+.smoke/
+deploy/aws/.state/
+deploy/gcp/.state/
